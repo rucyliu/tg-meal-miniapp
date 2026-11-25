@@ -4,9 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>每日點餐助手</title>
-  <!-- Telegram Mini App SDK -->
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <!-- Font Awesome 6 圖示庫 -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
   <link rel="stylesheet" href="style.css" />
 </head>
@@ -22,42 +20,39 @@
         <span id="order-status-badge" class="status-badge status-pending">
           <i class="fa-regular fa-clock"></i> 尚未點餐
         </span>
+        <button id="btn-fullscreen" class="icon-btn" title="切換全螢幕">
+          <i class="fa-solid fa-expand"></i>
+        </button>
         <button id="btn-refresh" class="icon-btn" title="重新整理資料">
           <i class="fa-solid fa-rotate"></i>
         </button>
       </div>
     </header>
 
-    <!-- 分頁導覽列 -->
+    <!-- 三大核心分頁 -->
     <nav class="tab-nav">
       <button class="tab-btn active" data-tab="tab-order">
         <i class="fa-solid fa-bowl-food"></i> 今日點餐
       </button>
       <button class="tab-btn" data-tab="tab-history">
-        <i class="fa-solid fa-star-half-stroke"></i> 紀錄與評價
-        <span id="unrated-count" class="badge-dot hidden">0</span>
+        <i class="fa-solid fa-receipt"></i> 點餐紀錄
       </button>
-      <button class="tab-btn" data-tab="tab-settings">
-        <i class="fa-solid fa-gear"></i> 設定
+      <button class="tab-btn" data-tab="tab-reviews">
+        <i class="fa-solid fa-star-half-stroke"></i> 歷史評價
       </button>
     </nav>
 
     <!-- 分頁 1：今日點餐與智慧湊單 -->
     <main id="tab-order" class="tab-content active">
-      <!-- 預算智慧湊單卡片 -->
       <section class="card combo-card">
-        <div class="card-header">
-          <h2><i class="fa-solid fa-wand-magic-sparkles"></i> 預算內智慧湊單</h2>
-        </div>
-        <div class="combo-controls">
-          <div class="input-group">
-            <label for="budget-input">預算上限 ($)</label>
-            <input type="number" id="budget-input" value="160" min="30" max="1000" step="5" />
+        <div class="combo-row">
+          <div class="combo-title">
+            <i class="fa-solid fa-wand-magic-sparkles"></i> 預算湊單
           </div>
-          <label class="checkbox-label">
-            <input type="checkbox" id="exclude-low-rating" checked />
-            <span>排除 3 星以下雷店</span>
-          </label>
+          <div class="input-group">
+            <label for="budget-input">上限 $</label>
+            <input type="number" id="budget-input" value="150" min="30" max="1000" step="5" />
+          </div>
           <button id="btn-recommend" class="btn btn-primary">
             <i class="fa-solid fa-bolt"></i> 推薦組合
           </button>
@@ -65,7 +60,18 @@
         <div id="combo-results" class="combo-results hidden"></div>
       </section>
 
-      <!-- 今日店家菜單列表 -->
+      <div class="toolbar-row">
+        <span class="section-hint"><i class="fa-solid fa-circle-info"></i> 點「+」加入，下方自訂備註</span>
+        <div class="toolbar-actions">
+          <button id="btn-open-store-library" class="btn btn-outline-sm">
+            <i class="fa-solid fa-book-open"></i> 菜單庫 <span id="library-count-badge"></span>
+          </button>
+          <button id="btn-add-custom-item" class="btn btn-outline-sm">
+            <i class="fa-solid fa-plus"></i> 手動新增
+          </button>
+        </div>
+      </div>
+
       <section id="menu-container" class="menu-container">
         <div class="empty-state">
           <i class="fa-solid fa-spinner fa-spin"></i>
@@ -74,57 +80,68 @@
       </section>
     </main>
 
-    <!-- 分頁 2：歷史點餐紀錄與評價 -->
+    <!-- 分頁 2：點餐紀錄（逐一品項獨立評價 ＋ 刪除紀錄） -->
     <main id="tab-history" class="tab-content">
       <div id="history-container" class="history-container">
-        <div class="empty-state">
-          <p>尚無點餐紀錄</p>
-        </div>
+        <div class="empty-state"><p>尚無點餐紀錄</p></div>
       </div>
     </main>
 
-    <!-- 分頁 3：格式與提醒設定 -->
-    <main id="tab-settings" class="tab-content">
-      <section class="card">
-        <div class="card-header">
-          <h2><i class="fa-solid fa-sliders"></i> 個人化輸出與提醒設定</h2>
+    <!-- 分頁 3：歷史評價查詢 -->
+    <main id="tab-reviews" class="tab-content">
+      <section class="card filter-card">
+        <div class="search-box">
+          <i class="fa-solid fa-magnifying-glass"></i>
+          <input type="text" id="review-search-input" placeholder="搜尋店名、餐點名稱、標籤或心得..." />
+          <button id="btn-clear-search" class="icon-btn-plain hidden" title="清除搜尋">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
         </div>
-        <div class="form-group">
-          <label for="cfg-user-name">點餐顯示名稱（{user_name}）</label>
-          <input type="text" id="cfg-user-name" placeholder="例如：王小明" />
+        <div class="filter-chips" id="review-rating-filters">
+          <button class="filter-chip active" data-filter="all">全部</button>
+          <button class="filter-chip" data-filter="good"><i class="fa-solid fa-star"></i> 高分 (4-5★)</button>
+          <button class="filter-chip" data-filter="mid">普通 (3★)</button>
+          <button class="filter-chip" data-filter="bad"><i class="fa-solid fa-triangle-exclamation"></i> 雷區 (1-2★)</button>
         </div>
-        <div class="form-group">
-          <label for="cfg-deadline">每日點餐截止時間</label>
-          <input type="time" id="cfg-deadline" value="10:30" />
-        </div>
-        <div class="form-group">
-          <label for="cfg-template">固定複製格式模板</label>
-          <textarea id="cfg-template" rows="3" placeholder="【{user_name}】{items_text}（共 ${total_price}）"></textarea>
-          <small class="hint-text">可用變數：{user_name}、{items_text}、{total_price}、{note}</small>
-        </div>
-        <button id="btn-save-config" class="btn btn-primary btn-block">
-          <i class="fa-solid fa-floppy-disk"></i> 儲存設定
-        </button>
       </section>
+
+      <div id="reviews-container" class="reviews-container">
+        <div class="empty-state"><p>尚無歷史評價</p></div>
+      </div>
     </main>
 
-    <!-- 底部固定購物車與一鍵複製列 -->
+    <!-- 底部固定購物車與固定格式輸出列 -->
     <footer id="cart-bar" class="cart-bar hidden">
-      <div class="cart-summary" id="cart-toggle">
+      <div class="cart-summary" id="cart-toggle-bar">
         <div class="cart-info">
+          <button type="button" id="btn-toggle-cart" class="icon-btn-sm" title="展開/收合明細">
+            <i class="fa-solid fa-chevron-down" id="cart-chevron"></i>
+          </button>
           <span class="cart-count"><i class="fa-solid fa-bag-shopping"></i> 已選 <strong id="cart-item-count">0</strong> 項</span>
-          <span class="cart-total">總計 $<strong id="cart-total-price">0</strong></span>
+          <span class="cart-total">共 $<strong id="cart-total-price">0</strong></span>
         </div>
-        <button type="button" id="btn-clear-cart" class="text-danger-btn">清空</button>
+        <div class="cart-summary-actions">
+          <button type="button" id="btn-clear-cart" class="text-danger-btn">清空</button>
+          <button type="button" id="btn-quick-copy" class="btn btn-success btn-sm">
+            <i class="fa-solid fa-copy"></i> 確認複製
+          </button>
+        </div>
       </div>
 
-      <div class="cart-details">
+      <div id="cart-body" class="cart-body">
         <div id="cart-items-list" class="cart-items-list"></div>
-        <input type="text" id="order-note-input" class="note-input" placeholder="備註（例如：微糖少冰、不要香菜）" />
+
         <div class="preview-box">
-          <div class="preview-label">輸出預覽：</div>
-          <div id="format-preview" class="preview-text"></div>
+          <div class="preview-header">
+            <span>輸出格式預覽（可直接微調）：</span>
+            <label class="preview-toggle-label">
+              <input type="checkbox" id="toggle-append-thanks" checked />
+              <span>句尾加謝謝</span>
+            </label>
+          </div>
+          <textarea id="format-preview" class="preview-textarea" rows="3"></textarea>
         </div>
+
         <button id="btn-confirm-copy" class="btn btn-success btn-block">
           <i class="fa-solid fa-copy"></i> 確認點餐並複製格式
         </button>
@@ -132,15 +149,15 @@
     </footer>
   </div>
 
-  <!-- 評價彈出視窗（支援 ESC 關閉） -->
+  <!-- 彈窗 1：針對單一餐點撰寫評價 -->
   <div id="rating-modal" class="modal-backdrop hidden">
     <div class="modal-card">
       <div class="modal-header">
-        <h3><i class="fa-solid fa-star"></i> 撰寫店家與餐點評價</h3>
-        <button id="btn-close-modal" class="icon-btn"><i class="fa-solid fa-xmark"></i></button>
+        <h3><i class="fa-solid fa-star"></i> 撰寫餐點評價</h3>
+        <button class="icon-btn" data-close-modal="rating-modal"><i class="fa-solid fa-xmark"></i></button>
       </div>
       <div class="modal-body">
-        <p id="modal-order-title" class="modal-subtitle"></p>
+        <div id="modal-review-target" class="modal-target-box"></div>
         <div class="star-selector" id="star-selector">
           <i class="fa-solid fa-star active" data-val="1"></i>
           <i class="fa-solid fa-star active" data-val="2"></i>
@@ -152,12 +169,14 @@
           <span class="tag-chip" data-tag="#會回購">#會回購</span>
           <span class="tag-chip" data-tag="#CP值高">#CP值高</span>
           <span class="tag-chip" data-tag="#份量足">#份量足</span>
+          <span class="tag-chip" data-tag="#好喝">#好喝</span>
           <span class="tag-chip" data-tag="#偏油">#偏油</span>
           <span class="tag-chip" data-tag="#太甜">#太甜</span>
           <span class="tag-chip" data-tag="#偏鹹">#偏鹹</span>
+          <span class="tag-chip" data-tag="#份量少">#份量少</span>
           <span class="tag-chip" data-tag="#踩雷">#踩雷</span>
         </div>
-        <textarea id="review-comment" rows="3" placeholder="寫下簡短心得（選填）..."></textarea>
+        <textarea id="review-comment" rows="3" placeholder="寫下針對這份餐點的心得（選填）..."></textarea>
         <button id="btn-submit-review" class="btn btn-primary btn-block">
           <i class="fa-solid fa-check"></i> 送出評價
         </button>
@@ -165,7 +184,123 @@
     </div>
   </div>
 
-  <!-- Toast 提示訊息 -->
+  <!-- 彈窗 2：編輯／新增菜單品項與金額 -->
+  <div id="menu-edit-modal" class="modal-backdrop hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="menu-modal-title"><i class="fa-solid fa-pen-to-square"></i> 編輯品項</h3>
+        <button class="icon-btn" data-close-modal="menu-edit-modal"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="edit-menu-id" />
+        <div class="form-group">
+          <label for="edit-store-name">店家名稱</label>
+          <input type="text" id="edit-store-name" placeholder="例如：禾饗" />
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label for="edit-category">分類</label>
+            <select id="edit-category">
+              <option value="主餐">主餐</option>
+              <option value="飲料">飲料</option>
+              <option value="單點/配菜">單點/配菜</option>
+              <option value="加料">加料</option>
+              <option value="店家備註">店家備註</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="edit-price">金額 / 加價 ($)</label>
+            <input type="number" id="edit-price" min="0" step="1" value="0" />
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="edit-item-name">品項名稱 / 備註內容</label>
+          <input type="text" id="edit-item-name" placeholder="例如：火雞肉飯便當 或 主餐加大 +$10" />
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label for="edit-spec">規格（選填）</label>
+            <input type="text" id="edit-spec" placeholder="例如：L、M、大碗" />
+          </div>
+          <div class="form-group">
+            <label for="edit-note">原始備註（選填）</label>
+            <input type="text" id="edit-note" placeholder="例如：甜度固定" />
+          </div>
+        </div>
+        <div class="modal-footer-btns">
+          <button id="btn-delete-menu-item" class="btn btn-danger hidden">
+            <i class="fa-solid fa-trash"></i> 刪除
+          </button>
+          <button id="btn-save-menu-item" class="btn btn-primary" style="flex:1;">
+            <i class="fa-solid fa-floppy-disk"></i> 儲存
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 彈窗 3：修改店家名稱 -->
+  <div id="store-rename-modal" class="modal-backdrop hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3><i class="fa-solid fa-store"></i> 修改店家名稱</h3>
+        <button class="icon-btn" data-close-modal="store-rename-modal"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="rename-old-store" />
+        <div class="form-group">
+          <label for="rename-new-store">新的店家名稱（將同步套用至該店所有品項）</label>
+          <input type="text" id="rename-new-store" />
+        </div>
+        <button id="btn-save-store-rename" class="btn btn-primary btn-block">
+          <i class="fa-solid fa-check"></i> 確認修改
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 彈窗 4：選擇加料要掛載在哪一杯飲料底下 -->
+  <div id="topping-target-modal" class="modal-backdrop hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3><i class="fa-solid fa-mug-saucer"></i> 選擇加料目標飲料</h3>
+        <button class="icon-btn" data-close-modal="topping-target-modal"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="modal-body">
+        <div id="topping-modal-info" class="modal-target-box"></div>
+        <div id="topping-target-list" class="topping-target-list"></div>
+        <button id="btn-add-topping-standalone" class="btn btn-ghost btn-block" style="margin-top:10px;">
+          <i class="fa-solid fa-plus"></i> 不掛載，改以獨立品項加入
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 彈窗 5：從已存菜單庫勾選今日要點的店家 -->
+  <div id="store-library-modal" class="modal-backdrop hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3><i class="fa-solid fa-book-open"></i> 菜單庫（切換今日店家）</h3>
+        <button class="icon-btn" data-close-modal="store-library-modal"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="modal-body">
+        <div class="search-box">
+          <i class="fa-solid fa-magnifying-glass"></i>
+          <input type="text" id="store-lib-search" placeholder="搜尋已存店家名稱..." />
+        </div>
+        <div class="store-lib-summary">
+          <span id="store-lib-selected-hint">已勾選 0 家</span>
+          <button type="button" id="btn-uncheck-all-stores" class="text-danger-btn">全部取消勾選</button>
+        </div>
+        <div id="store-library-list" class="store-lib-list"></div>
+        <button id="btn-apply-store-library" class="btn btn-primary btn-block" style="margin-top:12px;">
+          <i class="fa-solid fa-check"></i> 套用為今日菜單
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast 提示 -->
   <div id="toast" class="toast hidden"></div>
 
   <script src="api.js"></script>
