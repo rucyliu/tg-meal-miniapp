@@ -42,6 +42,11 @@ body.cart-expanded {
   display: none !important;
 }
 
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed !important;
+}
+
 /* 頂部列 */
 .app-header {
   display: flex;
@@ -210,7 +215,7 @@ input[type="number"]#budget-input {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
   gap: 8px;
 }
 
@@ -224,6 +229,47 @@ input[type="number"]#budget-input {
 .section-hint {
   font-size: 12px;
   color: var(--text-muted);
+}
+
+/* 價格篩選、排序與一鍵展開列 */
+.menu-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 10px;
+  margin-bottom: 12px;
+}
+
+.menu-filter-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.price-input-wrap {
+  display: inline-flex;
+  align-items: center;
+  background: var(--bg-body);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding-right: 4px;
+}
+
+.price-input-wrap input {
+  width: 78px;
+  border: none;
+  background: transparent;
+  padding: 5px 8px;
+  outline: none;
+}
+
+#menu-sort-select {
+  padding: 5px 8px;
+  font-size: 12px;
 }
 
 .btn {
@@ -282,7 +328,7 @@ input[type="number"]#budget-input {
   font-size: 14px;
 }
 
-/* 推薦組合 */
+/* 推薦組合卡片（含個別金額、評價與點過次數） */
 .combo-results {
   margin-top: 10px;
   display: flex;
@@ -293,8 +339,14 @@ input[type="number"]#budget-input {
 .combo-item {
   background: var(--bg-elevated);
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: 9px;
   padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.combo-item-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -308,26 +360,71 @@ input[type="number"]#budget-input {
   padding: 2px 6px;
   border-radius: 4px;
   display: inline-block;
-  margin-bottom: 3px;
 }
 
-/* 店家與菜單列表 */
+.combo-total-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.combo-detail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.combo-detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+  background: rgba(11, 17, 32, 0.45);
+  border: 1px solid rgba(41, 53, 72, 0.65);
+  border-radius: 7px;
+  padding: 6px 8px;
+}
+
+.combo-detail-left {
+  min-width: 0;
+  flex: 1;
+}
+
+.combo-detail-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 3px;
+}
+
+.combo-detail-price {
+  font-weight: 700;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+/* 店家與可收合菜單卡片 */
 .store-section {
   background: var(--bg-card);
   border: 1px solid var(--border-color);
   border-radius: var(--radius);
-  padding: 12px;
-  margin-bottom: 12px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
 }
 
 .store-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.store-section.expanded .store-header {
   padding-bottom: 8px;
   margin-bottom: 8px;
   border-bottom: 1px solid var(--border-color);
-  gap: 8px;
 }
 
 .store-title-wrap {
@@ -335,11 +432,32 @@ input[type="number"]#budget-input {
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
+  min-width: 0;
+}
+
+.store-chevron {
+  color: var(--text-muted);
+  font-size: 12px;
+  width: 14px;
+  text-align: center;
+  flex-shrink: 0;
 }
 
 .store-name {
   font-size: 15px;
   font-weight: 700;
+}
+
+.store-count-pill {
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--bg-elevated);
+  padding: 1px 7px;
+  border-radius: 99px;
+}
+
+.store-body.hidden {
+  display: none;
 }
 
 /* 店家備註公告框 */
@@ -370,10 +488,26 @@ input[type="number"]#budget-input {
 
 .rating-badge {
   font-size: 11px;
-  padding: 2px 7px;
+  padding: 2px 8px;
   border-radius: 99px;
   font-weight: 600;
   white-space: nowrap;
+}
+
+.rating-badge.clickable {
+  cursor: pointer;
+}
+
+.rating-badge.clickable:hover {
+  filter: brightness(1.15);
+}
+
+.item-meta-pills {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 3px;
 }
 
 .item-rating-pill {
@@ -381,11 +515,29 @@ input[type="number"]#budget-input {
   padding: 1px 6px;
   border-radius: 6px;
   font-weight: 600;
-  margin-left: 4px;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   gap: 3px;
+}
+
+.item-count-pill {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: rgba(56, 189, 248, 0.14);
+  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.item-count-zero {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: rgba(148, 163, 184, 0.12);
+  color: var(--text-muted);
 }
 
 .rating-good {
@@ -497,6 +649,7 @@ input[type="number"]#budget-input {
   gap: 10px;
   font-size: 13px;
   cursor: pointer;
+  flex: 1;
 }
 
 .cart-summary-actions {
@@ -643,6 +796,25 @@ input[type="number"]#budget-input {
   resize: vertical;
   padding: 0;
   outline: none;
+}
+
+/* 回到頂部按鈕 */
+.back-to-top {
+  position: fixed;
+  right: 16px;
+  bottom: 64px;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: var(--accent-dark);
+  color: #fff;
+  border: 1px solid rgba(56, 189, 248, 0.5);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 45;
 }
 
 /* 點餐紀錄卡片 */
