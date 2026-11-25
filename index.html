@@ -44,6 +44,7 @@
 
     <!-- 分頁 1：今日點餐與智慧湊單 -->
     <main id="tab-order" class="tab-content active">
+      <!-- 預算智慧湊單卡片 -->
       <section class="card combo-card">
         <div class="combo-row">
           <div class="combo-title">
@@ -60,8 +61,9 @@
         <div id="combo-results" class="combo-results hidden"></div>
       </section>
 
+      <!-- 菜單管理按鈕列 -->
       <div class="toolbar-row">
-        <span class="section-hint"><i class="fa-solid fa-circle-info"></i> 點「+」加入，下方自訂備註</span>
+        <span class="section-hint"><i class="fa-solid fa-circle-info"></i> 點擊店家列可展開或收合品項</span>
         <div class="toolbar-actions">
           <button id="btn-open-store-library" class="btn btn-outline-sm">
             <i class="fa-solid fa-book-open"></i> 菜單庫 <span id="library-count-badge"></span>
@@ -71,6 +73,31 @@
           </button>
         </div>
       </div>
+
+      <!-- 菜單價格篩選、排序與一鍵收合列 -->
+      <section class="card menu-filter-bar">
+        <div class="menu-filter-group">
+          <label for="menu-max-price"><i class="fa-solid fa-filter"></i> 價格</label>
+          <div class="price-input-wrap">
+            <input type="number" id="menu-max-price" min="1" max="2000" step="5" placeholder="上限 $" />
+            <button type="button" id="btn-clear-price-filter" class="icon-btn-plain hidden" title="清除價格篩選">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </div>
+        </div>
+        <div class="menu-filter-group">
+          <select id="menu-sort-select" title="品項排序方式">
+            <option value="default">預設順序</option>
+            <option value="price_asc">價格：低 → 高</option>
+            <option value="price_desc">價格：高 → 低</option>
+            <option value="rating_desc">評價：高 → 低</option>
+            <option value="count_desc">點過：多 → 少</option>
+          </select>
+        </div>
+        <button type="button" id="btn-toggle-all-stores" class="btn btn-ghost btn-sm" title="全部展開或收合">
+          <i class="fa-solid fa-angles-down"></i> 全部展開
+        </button>
+      </section>
 
       <section id="menu-container" class="menu-container">
         <div class="empty-state">
@@ -110,7 +137,7 @@
       </div>
     </main>
 
-    <!-- 底部固定購物車與固定格式輸出列 -->
+    <!-- 底部固定購物車與固定格式輸出列（已移除重複的右上角確認複製鈕） -->
     <footer id="cart-bar" class="cart-bar hidden">
       <div class="cart-summary" id="cart-toggle-bar">
         <div class="cart-info">
@@ -122,9 +149,6 @@
         </div>
         <div class="cart-summary-actions">
           <button type="button" id="btn-clear-cart" class="text-danger-btn">清空</button>
-          <button type="button" id="btn-quick-copy" class="btn btn-success btn-sm">
-            <i class="fa-solid fa-copy"></i> 確認複製
-          </button>
         </div>
       </div>
 
@@ -148,6 +172,11 @@
       </div>
     </footer>
   </div>
+
+  <!-- 回到頂部懸浮按鈕 -->
+  <button id="btn-back-to-top" class="back-to-top hidden" title="回到頂部">
+    <i class="fa-solid fa-arrow-up"></i>
+  </button>
 
   <!-- 彈窗 1：針對單一餐點撰寫評價 -->
   <div id="rating-modal" class="modal-backdrop hidden">
@@ -184,7 +213,7 @@
     </div>
   </div>
 
-  <!-- 彈窗 2：編輯／新增菜單品項與金額 -->
+  <!-- 彈窗 2：編輯／新增菜單品項與金額（支援菜單庫店家下拉選擇） -->
   <div id="menu-edit-modal" class="modal-backdrop hidden">
     <div class="modal-card">
       <div class="modal-header">
@@ -194,8 +223,9 @@
       <div class="modal-body">
         <input type="hidden" id="edit-menu-id" />
         <div class="form-group">
-          <label for="edit-store-name">店家名稱</label>
-          <input type="text" id="edit-store-name" placeholder="例如：禾饗" />
+          <label for="edit-store-select">選擇菜單庫店家（或自行輸入新店家）</label>
+          <select id="edit-store-select" style="margin-bottom:6px;"></select>
+          <input type="text" id="edit-store-name" placeholder="輸入店家名稱，例如：禾饗" />
         </div>
         <div class="form-row-2">
           <div class="form-group">
@@ -249,7 +279,7 @@
       <div class="modal-body">
         <input type="hidden" id="rename-old-store" />
         <div class="form-group">
-          <label for="rename-new-store">新的店家名稱（將同步套用至該店所有品項）</label>
+          <label for="rename-new-store">新的店家名稱（將同步更新該店品項、歷史紀錄與評價）</label>
           <input type="text" id="rename-new-store" />
         </div>
         <button id="btn-save-store-rename" class="btn btn-primary btn-block">
