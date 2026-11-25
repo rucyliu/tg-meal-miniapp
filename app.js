@@ -1,8 +1,8 @@
 const tg = window.Telegram ? window.Telegram.WebApp : null;
 
-const SUGAR_OPTIONS = ['無糖', '1分糖', '微糖', '半糖', '少糖', '正常糖'];
-const ICE_OPTIONS = ['去冰', '微冰', '少冰', '正常冰', '常溫', '熱飲'];
-const FOOD_QUICK_NOTES = ['少飯', '飯多', '不蔥', '不辣', '小辣'];
+const SUGAR_OPTIONS = ['無糖', '1分糖', '微糖', '半糖', '少糖'];
+const ICE_OPTIONS = ['去冰', '微冰', '少冰', '常溫', '熱飲'];
+const FOOD_QUICK_NOTES = ['少飯', '加辣'];
 
 const state = {
   today: '',
@@ -18,11 +18,16 @@ const state = {
   activeReviewTarget: null,
   selectedRating: 5,
   storeOrderList: [],
+  expandedStores: new Set(),
+  hasInitializedExpand: false,
+  menuMaxPrice: null,
+  menuSortBy: 'default',
   lastRecommended: [],
   pendingToppingItem: null,
   appendThanks: true,
   draftSelectedStores: new Set(),
-  storeLibSearch: ''
+  storeLibSearch: '',
+  pendingActions: new Set() // 全域防連點鎖集合
 };
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -45,6 +50,40 @@ function escapeHtml(str) {
 
 function normText(str) {
   return String(str || '').replace(/[\s ]+/g, '').toLowerCase();
+}
+
+/**
+ * 通用防連點執行器：鎖定 actionKey 與指定按鈕（並自動還原文字與狀態）
+ */
+async function runWithLock(actionKey, buttons, asyncFn, loadingHtml = null) {
+  if (state.pendingActions.has(actionKey)) return;
+  state.pendingActions.add(actionKey);
+
+  const btnList = (Array.isArray(buttons) ? buttons : [buttons]).filter(Boolean);
+  const originalStates = btnList.map(btn => ({
+    btn,
+    disabled: btn.disabled,
+    html: btn.innerHTML
+  }));
+
+  btnList.forEach((btn, idx) => {
+    btn.disabled = true;
+    if (idx === 0 && loadingHtml) {
+      btn.innerHTML = loadingHtml;
+    }
+  });
+
+  try {
+    await asyncFn();
+  } finally {
+    state.pendingActions.delete(actionKey);
+    originalStates.forEach(item => {
+      if (document.body.contains(item.btn)) {
+        item.btn.disabled = item.disabled;
+        item.btn.innerHTML = item.html;
+      }
+    });
+  }
 }
 
 async function initDashboard(forceRefresh = false) {
@@ -72,6 +111,16 @@ function applyDashboardData(data) {
   state.orders = data.orders || [];
   state.reviews = data.reviews || [];
 
+  // 初始化店家收合狀態：僅 1 家店時預設展開，2 家以上預設收合以節省捲動長度
+  const uniqueTodayStores = [...new Set(state.menus.map(m => m.store_name).filter(Boolean))];
+  if (!state.hasInitializedExpand && uniqueTodayStores.length > 0) {
+    state.expandedStores.clear();
+    if (uniqueTodayStores.length === 1) {
+      state.expandedStores.add(uniqueTodayStores[0]);
+    }
+    state.hasInitializedExpand = true;
+  }
+
   const libBadge = document.getElementById('library-count-badge');
   if (libBadge) {
     libBadge.textContent = state.savedStores.length > 0 ? `(${state.savedStores.length})` : '';
@@ -83,7 +132,7 @@ function applyDashboardData(data) {
   renderReviewsTab();
 }
 
-/* ==================== 評價比對輔助函式 ==================== */
+/* ==================== 評價與點餐次數統計輔助函式 ==================== */
 
 function getStoreRatingStats(storeName) {
   const target = normText(storeName);
@@ -110,6 +159,26 @@ function getItemRatingStats(storeName, itemName) {
   return { count: matched.length, avg, tags, latestComment: matched[0].comment || '' };
 }
 
+/**
+ * 統計該店家指定品項在歷史點餐紀錄中被點過的總次數
+ */
+function getItemOrderCount(storeName, itemName) {
+  const targetStore = normText(storeName);
+  const targetItem = normText(itemName);
+  let count = 0;
+
+  state.orders.forEach(ord => {
+    const items = Array.isArray(ord.items) ? ord.items : [];
+    items.forEach(it => {
+      if (it && normText(it.store_name) === targetStore && normText(it.item_name) === targetItem) {
+        count++;
+      }
+    });
+  });
+
+  return count;
+}
+
 function findReviewForOrderItem(orderId, storeName, itemName) {
   const targetStore = normText(storeName);
   const targetItem = normText(itemName);
@@ -127,7 +196,7 @@ function getRatingColorClass(avg) {
   return 'rating-bad';
 }
 
-/* ==================== 頂部與今日菜單渲染 ==================== */
+/* ==================== 頂部與今日菜單（含篩選、排序、收合、點過次數） ==================== */
 
 function renderHeader() {
   document.getElementById('today-date').textContent = state.today;
@@ -141,9 +210,46 @@ function renderHeader() {
   }
 }
 
+function sortMenuItems(items) {
+  const arr = [...items];
+  switch (state.menuSortBy) {
+    case 'price_asc':
+      return arr.sort((a, b) => (a.price || 0) - (b.price || 0));
+    case 'price_desc':
+      return arr.sort((a, b) => (b.price || 0) - (a.price || 0));
+    case 'rating_desc':
+      return arr.sort((a, b) => {
+        const ra = getItemRatingStats(a.store_name, a.item_name).avg ?? -1;
+        const rb = getItemRatingStats(b.store_name, b.item_name).avg ?? -1;
+        return rb - ra;
+      });
+    case 'count_desc':
+      return arr.sort((a, b) => {
+        const ca = getItemOrderCount(a.store_name, a.item_name);
+        const cb = getItemOrderCount(b.store_name, b.item_name);
+        return cb - ca;
+      });
+    default:
+      return arr;
+  }
+}
+
+function updateToggleAllStoresBtn() {
+  const btn = document.getElementById('btn-toggle-all-stores');
+  if (!btn) return;
+  const allExpanded = state.storeOrderList.length > 0 &&
+    state.storeOrderList.every(name => state.expandedStores.has(name));
+
+  btn.innerHTML = allExpanded
+    ? '<i class="fa-solid fa-angles-up"></i> 全部收合'
+    : '<i class="fa-solid fa-angles-down"></i> 全部展開';
+}
+
 function renderMenus() {
   const container = document.getElementById('menu-container');
   if (state.menus.length === 0) {
+    state.storeOrderList = [];
+    updateToggleAllStoresBtn();
     const pickOldBtn = state.savedStores.length > 0
       ? `<button class="btn btn-primary" style="margin-top:12px;" onclick="openStoreLibraryModal()">
            <i class="fa-solid fa-book-open"></i> 從菜單庫挑選今日店家（已存 ${state.savedStores.length} 家）
@@ -166,17 +272,35 @@ function renderMenus() {
   });
 
   state.storeOrderList = Object.keys(storeMap);
+  const maxPrice = state.menuMaxPrice;
 
   const html = state.storeOrderList.map((storeName, sIdx) => {
     const allStoreRows = storeMap[storeName];
     const storeNotes = allStoreRows.filter(i => i.category === '店家備註');
-    const menuItems = allStoreRows.filter(i => i.category !== '店家備註');
+    const allMenuItems = allStoreRows.filter(i => i.category !== '店家備註');
 
+    // 套用價格上限篩選
+    const filteredItems = maxPrice !== null
+      ? allMenuItems.filter(it => Number(it.price) <= maxPrice)
+      : allMenuItems;
+
+    const isExpanded = state.expandedStores.has(storeName);
+    const chevronClass = isExpanded ? 'fa-chevron-down' : 'fa-chevron-right';
+    const countLabel = maxPrice !== null
+      ? `符合 ${filteredItems.length}/${allMenuItems.length} 項`
+      : `${allMenuItems.length} 項`;
+
+    // 店家評價星等（可點擊直接跳轉查詢該店歷史評價）
     const storeStats = getStoreRatingStats(storeName);
     let storeRatingHtml = `<span class="rating-badge rating-new"><i class="fa-regular fa-star"></i> 無評價</span>`;
     if (storeStats.avg !== null) {
       const cls = getRatingColorClass(storeStats.avg);
-      storeRatingHtml = `<span class="rating-badge ${cls}"><i class="fa-solid fa-star"></i> 店均 ${storeStats.avg}</span>`;
+      storeRatingHtml = `
+        <span class="rating-badge ${cls} clickable"
+          onclick="event.stopPropagation(); jumpToStoreReviews(${sIdx})"
+          title="點擊查看此店家歷史評價">
+          <i class="fa-solid fa-star"></i> 店均 ${storeStats.avg}
+        </span>`;
     }
 
     let storeNotesHtml = '';
@@ -199,98 +323,147 @@ function renderMenus() {
         </div>`;
     }
 
+    // 分類與排序渲染
     const catOrder = ['主餐', '飲料', '單點/配菜', '加料'];
     const catGroups = {};
-    menuItems.forEach(it => {
+    filteredItems.forEach(it => {
       const cat = catOrder.includes(it.category) ? it.category : '主餐';
       if (!catGroups[cat]) catGroups[cat] = [];
       catGroups[cat].push(it);
     });
 
-    const catsHtml = catOrder
-      .filter(cat => catGroups[cat] && catGroups[cat].length > 0)
-      .map(cat => {
-        const rowsHtml = catGroups[cat].map(it => {
-          const specText = it.spec ? ` (${escapeHtml(it.spec)})` : '';
-          const noteText = it.note ? `<div class="item-meta">${escapeHtml(it.note)}</div>` : '';
+    let catsHtml = '';
+    if (filteredItems.length === 0) {
+      catsHtml = `<div class="item-meta" style="padding:10px 4px;text-align:center;">此店目前沒有 $${maxPrice} 元以下的品項</div>`;
+    } else {
+      catsHtml = catOrder
+        .filter(cat => catGroups[cat] && catGroups[cat].length > 0)
+        .map(cat => {
+          const sortedCatItems = sortMenuItems(catGroups[cat]);
+          const rowsHtml = sortedCatItems.map(it => {
+            const specText = it.spec ? ` (${escapeHtml(it.spec)})` : '';
+            const noteText = it.note ? `<div class="item-meta">${escapeHtml(it.note)}</div>` : '';
 
-          const itemStats = getItemRatingStats(it.store_name, it.item_name);
-          let itemReviewPill = '';
-          if (itemStats.avg !== null) {
-            const cls = getRatingColorClass(itemStats.avg);
-            const icon = itemStats.avg < 3 ? 'fa-triangle-exclamation' : 'fa-star';
-            const tagStr = itemStats.tags.length > 0 ? ` ${escapeHtml(itemStats.tags[0])}` : '';
-            itemReviewPill = `
-              <span class="item-rating-pill ${cls}" onclick="jumpToReviewSearch('${escapeHtml(it.id)}')" title="查看歷史評價">
-                <i class="fa-solid ${icon}"></i> ${itemStats.avg}${tagStr}
-              </span>`;
-          }
+            // 歷史評價徽章
+            const itemStats = getItemRatingStats(it.store_name, it.item_name);
+            let itemReviewPill = '';
+            if (itemStats.avg !== null) {
+              const cls = getRatingColorClass(itemStats.avg);
+              const icon = itemStats.avg < 3 ? 'fa-triangle-exclamation' : 'fa-star';
+              const tagStr = itemStats.tags.length > 0 ? ` ${escapeHtml(itemStats.tags[0])}` : '';
+              itemReviewPill = `
+                <span class="item-rating-pill ${cls}" onclick="jumpToReviewSearch('${escapeHtml(it.id)}')" title="查看此品項歷史評價">
+                  <i class="fa-solid ${icon}"></i> ${itemStats.avg}${tagStr}
+                </span>`;
+            }
 
-          const addBtnTitle = cat === '加料' ? '加料至已選飲料' : '加入點餐';
-          const pricePrefix = cat === '加料' ? '+$' : '$';
+            // 歷史點過次數徽章
+            const orderCount = getItemOrderCount(it.store_name, it.item_name);
+            const countPill = orderCount > 0
+              ? `<span class="item-count-pill" title="歷史點過次數"><i class="fa-solid fa-bag-shopping"></i> 點過 ${orderCount} 次</span>`
+              : '';
 
-          return `
-            <div class="menu-row">
-              <div class="menu-item-info">
-                <div>
-                  <strong>${escapeHtml(it.item_name)}${specText}</strong>
-                  ${itemReviewPill}
+            const pillsRow = (itemReviewPill || countPill)
+              ? `<div class="item-meta-pills">${itemReviewPill}${countPill}</div>`
+              : '';
+
+            const addBtnTitle = cat === '加料' ? '加料至已選飲料' : '加入點餐';
+            const pricePrefix = cat === '加料' ? '+$' : '$';
+
+            return `
+              <div class="menu-row">
+                <div class="menu-item-info">
+                  <div><strong>${escapeHtml(it.item_name)}${specText}</strong></div>
+                  ${pillsRow}
+                  ${noteText}
                 </div>
-                ${noteText}
-              </div>
-              <div class="item-actions">
-                <span class="item-price">${pricePrefix}${it.price}</span>
-                <button class="icon-btn-sm" onclick="openEditMenuModalById('${escapeHtml(it.id)}')" title="編輯品項或金額">
-                  <i class="fa-solid fa-pen"></i>
-                </button>
-                <button class="qty-btn" onclick="addToCart('${escapeHtml(it.id)}')" title="${addBtnTitle}">
-                  <i class="fa-solid fa-plus"></i>
-                </button>
-              </div>
-            </div>`;
+                <div class="item-actions">
+                  <span class="item-price">${pricePrefix}${it.price}</span>
+                  <button class="icon-btn-sm" onclick="openEditMenuModalById('${escapeHtml(it.id)}')" title="編輯品項或金額">
+                    <i class="fa-solid fa-pen"></i>
+                  </button>
+                  <button class="qty-btn" onclick="addToCart('${escapeHtml(it.id)}')" title="${addBtnTitle}">
+                    <i class="fa-solid fa-plus"></i>
+                  </button>
+                </div>
+              </div>`;
+          }).join('');
+          return `<div class="category-title">${cat}</div>${rowsHtml}`;
         }).join('');
-        return `<div class="category-title">${cat}</div>${rowsHtml}`;
-      }).join('');
+    }
 
     return `
-      <section class="store-section">
-        <div class="store-header">
+      <section class="store-section ${isExpanded ? 'expanded' : ''}">
+        <div class="store-header" onclick="toggleStoreAccordion(${sIdx})">
           <div class="store-title-wrap">
+            <i class="fa-solid ${chevronClass} store-chevron"></i>
             <span class="store-name"><i class="fa-solid fa-store"></i> ${escapeHtml(storeName)}</span>
-            <button class="icon-btn-sm" onclick="openRenameStoreModal(${sIdx})" title="修改店家名稱">
+            <span class="store-count-pill">${countLabel}</span>
+            <button class="icon-btn-sm" onclick="event.stopPropagation(); openRenameStoreModal(${sIdx})" title="修改店家名稱">
               <i class="fa-solid fa-pen"></i>
             </button>
           </div>
           ${storeRatingHtml}
         </div>
-        ${storeNotesHtml}
-        ${catsHtml}
-        <div class="store-footer">
-          <button class="btn btn-outline-sm" onclick="openAddMenuModalForStore(${sIdx})">
-            <i class="fa-solid fa-plus"></i> 新增品項 / 店家備註
-          </button>
+        <div class="store-body ${isExpanded ? '' : 'hidden'}">
+          ${storeNotesHtml}
+          ${catsHtml}
+          <div class="store-footer">
+            <button class="btn btn-outline-sm" onclick="openAddMenuModalForStore(${sIdx})">
+              <i class="fa-solid fa-plus"></i> 新增品項 / 店家備註
+            </button>
+          </div>
         </div>
       </section>`;
   }).join('');
 
   container.innerHTML = html;
+  updateToggleAllStoresBtn();
 }
 
-window.jumpToReviewSearch = function(menuId) {
-  const item = state.menus.find(m => m.id === menuId);
-  if (!item) return;
+window.toggleStoreAccordion = function(storeIdx) {
+  const storeName = state.storeOrderList[storeIdx];
+  if (!storeName) return;
+  if (state.expandedStores.has(storeName)) {
+    state.expandedStores.delete(storeName);
+  } else {
+    state.expandedStores.add(storeName);
+  }
+  renderMenus();
+};
+
+function navigateToReviewsWithKeyword(keyword) {
   switchTab('tab-reviews');
-  state.reviewSearch = item.item_name;
+  state.reviewSearch = keyword;
   state.reviewFilter = 'all';
-  document.getElementById('review-search-input').value = item.item_name;
-  document.getElementById('btn-clear-search').classList.remove('hidden');
+  document.getElementById('review-search-input').value = keyword;
+  document.getElementById('btn-clear-search').classList.toggle('hidden', !keyword);
   document.querySelectorAll('#review-rating-filters .filter-chip').forEach(c => {
     c.classList.toggle('active', c.dataset.filter === 'all');
   });
   renderReviewsTab();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+window.jumpToStoreReviews = function(storeIdx) {
+  const storeName = state.storeOrderList[storeIdx];
+  if (!storeName) return;
+  navigateToReviewsWithKeyword(storeName);
 };
 
-/* ==================== 預算智慧湊單（預設 $150） ==================== */
+window.jumpToReviewSearch = function(menuId) {
+  const item = state.menus.find(m => m.id === menuId);
+  if (!item) return;
+  navigateToReviewsWithKeyword(item.item_name);
+};
+
+window.jumpToComboItemReview = function(comboIdx, itemIdx) {
+  const combo = state.lastRecommended[comboIdx];
+  if (!combo || !combo.items || !combo.items[itemIdx]) return;
+  navigateToReviewsWithKeyword(combo.items[itemIdx].item_name);
+};
+
+/* ==================== 預算智慧湊單（顯示個別金額、歷史評價與點過次數） ==================== */
 
 function recommendCombos() {
   const budget = Number(document.getElementById('budget-input').value) || 150;
@@ -367,16 +540,59 @@ function recommendCombos() {
   }
 
   state.lastRecommended = picked;
-  resultBox.innerHTML = picked.map((c, idx) => {
-    const names = c.items.map(i => `${escapeHtml(i.item_name)}${i.spec ? `(${escapeHtml(i.spec)})` : ''}`).join(' + ');
+  resultBox.innerHTML = picked.map((c, cIdx) => {
+    const detailRowsHtml = c.items.map((it, itemIdx) => {
+      const iStats = getItemRatingStats(it.store_name, it.item_name);
+      const sStats = getStoreRatingStats(it.store_name);
+      const orderCount = getItemOrderCount(it.store_name, it.item_name);
+
+      let ratingPill = '';
+      if (iStats.avg !== null) {
+        const cls = getRatingColorClass(iStats.avg);
+        const icon = iStats.avg < 3 ? 'fa-triangle-exclamation' : 'fa-star';
+        const tagStr = iStats.tags.length > 0 ? ` ${escapeHtml(iStats.tags[0])}` : '';
+        ratingPill = `
+          <span class="item-rating-pill ${cls}" onclick="jumpToComboItemReview(${cIdx}, ${itemIdx})" title="查看歷史評價">
+            <i class="fa-solid ${icon}"></i> 品評 ${iStats.avg}${tagStr}
+          </span>`;
+      } else if (sStats.avg !== null) {
+        const cls = getRatingColorClass(sStats.avg);
+        ratingPill = `<span class="item-rating-pill ${cls}" onclick="navigateToReviewsWithKeyword(state.lastRecommended[${cIdx}].items[${itemIdx}].store_name)"><i class="fa-solid fa-store"></i> 店均 ${sStats.avg}</span>`;
+      } else {
+        ratingPill = `<span class="item-count-zero">尚無評價</span>`;
+      }
+
+      const countPill = orderCount > 0
+        ? `<span class="item-count-pill"><i class="fa-solid fa-bag-shopping"></i> 點過 ${orderCount} 次</span>`
+        : `<span class="item-count-zero">未點過</span>`;
+
+      const specStr = it.spec ? ` (${escapeHtml(it.spec)})` : '';
+      return `
+        <div class="combo-detail-row">
+          <div class="combo-detail-left">
+            <div>
+              <span class="cart-store-tag">${escapeHtml(it.store_name)}</span>
+              <strong>${escapeHtml(it.item_name)}${specStr}</strong>
+            </div>
+            <div class="combo-detail-badges">
+              ${ratingPill}
+              ${countPill}
+            </div>
+          </div>
+          <span class="combo-detail-price">$${it.price}</span>
+        </div>`;
+    }).join('');
+
     return `
       <div class="combo-item">
-        <div>
-          <span class="combo-tag">${escapeHtml(c.badge)} · 剩餘 $${budget - c.total}</span>
-          <div><strong>${names}</strong></div>
-          <div class="item-meta">總計 $${c.total}</div>
+        <div class="combo-item-header">
+          <div>
+            <span class="combo-tag">${escapeHtml(c.badge)} · 剩餘 $${budget - c.total}</span>
+            <span class="combo-total-label" style="margin-left:6px;">總計 $${c.total}</span>
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="applyRecommendedCombo(${cIdx})">套用此組合</button>
         </div>
-        <button class="btn btn-primary btn-sm" onclick="applyRecommendedCombo(${idx})">套用</button>
+        <div class="combo-detail-list">${detailRowsHtml}</div>
       </div>`;
   }).join('');
 
@@ -773,43 +989,38 @@ window.applyStoreNoteToCart = function(cartIdx, storeNoteMenuId) {
 async function confirmAndCopyOrder() {
   if (state.cart.length === 0) return;
 
-  const { totalPrice } = buildFormattedOrderText();
-  const finalFormattedText = document.getElementById('format-preview').value.trim();
-
-  await copyTextToClipboard(finalFormattedText);
-  if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
-  showToast('已複製點餐內容！可直接貼到群組');
-
   const btnMain = document.getElementById('btn-confirm-copy');
-  const btnQuick = document.getElementById('btn-quick-copy');
-  btnMain.disabled = true;
-  btnQuick.disabled = true;
+  await runWithLock('createOrder', btnMain, async () => {
+    const { totalPrice } = buildFormattedOrderText();
+    const finalFormattedText = document.getElementById('format-preview').value.trim();
 
-  const orderItemsPayload = state.cart.map(e => ({
-    store_name: e.store_name,
-    category: e.category,
-    item_name: e.item_name,
-    toppings: e.toppings || [],
-    spec: e.spec,
-    price: getCartEntryTotal(e),
-    note: [e.sugar, e.ice, e.custom_note].filter(Boolean).join('/')
-  }));
+    await copyTextToClipboard(finalFormattedText);
+    if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+    showToast('已複製點餐內容！可直接貼到群組');
 
-  try {
-    await callGasApi('createOrder', {
-      items: orderItemsPayload,
-      total_price: totalPrice,
-      formatted_text: finalFormattedText
-    });
-    state.cart = [];
-    renderCart();
-    await initDashboard(false);
-  } catch (err) {
-    showToast(`紀錄寫入失敗：${err.message}`);
-  } finally {
-    btnMain.disabled = false;
-    btnQuick.disabled = false;
-  }
+    const orderItemsPayload = state.cart.map(e => ({
+      store_name: e.store_name,
+      category: e.category,
+      item_name: e.item_name,
+      toppings: e.toppings || [],
+      spec: e.spec,
+      price: getCartEntryTotal(e),
+      note: [e.sugar, e.ice, e.custom_note].filter(Boolean).join('/')
+    }));
+
+    try {
+      await callGasApi('createOrder', {
+        items: orderItemsPayload,
+        total_price: totalPrice,
+        formatted_text: finalFormattedText
+      });
+      state.cart = [];
+      renderCart();
+      await initDashboard(false);
+    } catch (err) {
+      showToast(`紀錄寫入失敗：${err.message}`);
+    }
+  }, '<i class="fa-solid fa-spinner fa-spin"></i> 正在儲存點餐紀錄...');
 }
 
 async function copyTextToClipboard(text) {
@@ -829,7 +1040,7 @@ async function copyTextToClipboard(text) {
   document.body.removeChild(ta);
 }
 
-/* ==================== 分頁 2：點餐紀錄（逐一品項獨立評價 ＋ 刪除紀錄） ==================== */
+/* ==================== 分頁 2：點餐紀錄（逐一品項獨立評價 ＋ 防連點刪除） ==================== */
 
 function renderHistory() {
   const container = document.getElementById('history-container');
@@ -877,7 +1088,7 @@ function renderHistory() {
           <button class="btn btn-ghost btn-sm" onclick="reCopyOrder(${oIdx})">
             <i class="fa-regular fa-copy"></i> 再次複製
           </button>
-          <button class="btn btn-danger btn-sm" onclick="confirmDeleteOrder(${oIdx})">
+          <button class="btn btn-danger btn-sm" onclick="confirmDeleteOrder(${oIdx}, this)">
             <i class="fa-solid fa-trash-can"></i> 刪除紀錄
           </button>
         </div>
@@ -892,20 +1103,21 @@ window.reCopyOrder = async function(oIdx) {
   showToast('已複製該筆點餐內容');
 };
 
-window.confirmDeleteOrder = function(oIdx) {
+window.confirmDeleteOrder = function(oIdx, btnEl) {
   const ord = state.orders[oIdx];
   if (!ord) return;
+  const lockKey = `del_order_${ord.order_id}`;
+  if (state.pendingActions.has(lockKey)) return;
 
-  const doDelete = async () => {
+  const doDelete = () => runWithLock(lockKey, btnEl, async () => {
     try {
-      showToast('正在刪除點餐紀錄...');
       await callGasApi('deleteOrder', { order_id: ord.order_id });
       showToast('已刪除該筆點餐紀錄');
       await initDashboard(false);
     } catch (err) {
       showToast(`刪除失敗：${err.message}`);
     }
-  };
+  }, '<i class="fa-solid fa-spinner fa-spin"></i> 刪除中...');
 
   if (tg && tg.showConfirm) {
     tg.showConfirm(`確定要刪除 ${ord.date} 的這筆點餐紀錄嗎？`, ok => {
@@ -952,31 +1164,29 @@ async function submitReview() {
   const target = state.activeReviewTarget;
   if (!target) return;
 
-  const selectedTags = [...document.querySelectorAll('#quick-tags .tag-chip.selected')]
-    .map(el => el.dataset.tag)
-    .join(' ');
-  const comment = document.getElementById('review-comment').value.trim();
-
   const btn = document.getElementById('btn-submit-review');
-  btn.disabled = true;
+  await runWithLock('submitReview', btn, async () => {
+    const selectedTags = [...document.querySelectorAll('#quick-tags .tag-chip.selected')]
+      .map(el => el.dataset.tag)
+      .join(' ');
+    const comment = document.getElementById('review-comment').value.trim();
 
-  try {
-    await callGasApi('submitReview', {
-      order_id: target.order_id,
-      store_name: target.store_name,
-      item_name: target.item_name,
-      rating: state.selectedRating,
-      tags: selectedTags,
-      comment: comment
-    });
-    closeModal('rating-modal');
-    showToast(`已送出「${target.item_name}」的評價！`);
-    await initDashboard(false);
-  } catch (err) {
-    showToast(`評價失敗：${err.message}`);
-  } finally {
-    btn.disabled = false;
-  }
+    try {
+      await callGasApi('submitReview', {
+        order_id: target.order_id,
+        store_name: target.store_name,
+        item_name: target.item_name,
+        rating: state.selectedRating,
+        tags: selectedTags,
+        comment: comment
+      });
+      closeModal('rating-modal');
+      showToast(`已送出「${target.item_name}」的評價！`);
+      await initDashboard(false);
+    } catch (err) {
+      showToast(`評價失敗：${err.message}`);
+    }
+  }, '<i class="fa-solid fa-spinner fa-spin"></i> 送出中...');
 }
 
 /* ==================== 分頁 3：歷史評價查詢 ==================== */
@@ -1014,7 +1224,7 @@ function renderReviewsTab() {
           </div>
           <div style="display:flex;align-items:center;gap:6px;">
             <span class="rating-badge ${cls}">${r.rating}★</span>
-            <button class="icon-btn-plain" style="color:var(--danger);" onclick="confirmDeleteReview('${escapeHtml(r.review_id)}')" title="刪除此評價">
+            <button class="icon-btn-plain" style="color:var(--danger);" onclick="confirmDeleteReview('${escapeHtml(r.review_id)}', this)" title="刪除此評價">
               <i class="fa-solid fa-trash-can"></i>
             </button>
           </div>
@@ -1028,8 +1238,11 @@ function renderReviewsTab() {
   }).join('');
 }
 
-window.confirmDeleteReview = function(reviewId) {
-  const doDelete = async () => {
+window.confirmDeleteReview = function(reviewId, btnEl) {
+  const lockKey = `del_rev_${reviewId}`;
+  if (state.pendingActions.has(lockKey)) return;
+
+  const doDelete = () => runWithLock(lockKey, btnEl, async () => {
     try {
       await callGasApi('deleteReview', { review_id: reviewId });
       showToast('已刪除該筆評價');
@@ -1037,7 +1250,7 @@ window.confirmDeleteReview = function(reviewId) {
     } catch (err) {
       showToast(`刪除失敗：${err.message}`);
     }
-  };
+  }, '<i class="fa-solid fa-spinner fa-spin"></i>');
 
   if (tg && tg.showConfirm) {
     tg.showConfirm('確定要刪除這筆評價嗎？', ok => { if (ok) doDelete(); });
@@ -1095,7 +1308,7 @@ function renderStoreLibraryList() {
           </div>
         </div>
         <button type="button" class="icon-btn-plain" style="color:var(--danger);"
-          onclick="event.stopPropagation(); confirmDeleteSavedStore(${idx})" title="從菜單庫永久刪除">
+          onclick="event.stopPropagation(); confirmDeleteSavedStore(${idx}, this)" title="從菜單庫永久刪除">
           <i class="fa-solid fa-trash-can"></i>
         </button>
       </div>`;
@@ -1116,31 +1329,33 @@ window.toggleDraftStore = function(storeIdx) {
 
 async function applyStoreLibrarySelection() {
   const btn = document.getElementById('btn-apply-store-library');
-  btn.disabled = true;
-  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 套用中...';
-
-  try {
-    const activeStores = Array.from(state.draftSelectedStores);
-    const freshData = await callGasApi('setTodayStores', { active_stores: activeStores });
-    saveCachedDashboard(freshData);
-    applyDashboardData(freshData);
-    closeModal('store-library-modal');
-    showToast(activeStores.length > 0 ? `已啟用 ${activeStores.length} 家今日菜單` : '已清空今日啟用清單');
-  } catch (err) {
-    showToast(`套用失敗：${err.message}`);
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = '<i class="fa-solid fa-check"></i> 套用為今日菜單';
-  }
+  await runWithLock('applyStoreLibrary', btn, async () => {
+    try {
+      const activeStores = Array.from(state.draftSelectedStores);
+      const freshData = await callGasApi('setTodayStores', { active_stores: activeStores });
+      // 套用新店家後：若只有 1 家自動展開，2 家以上預設收合
+      state.expandedStores.clear();
+      if (activeStores.length === 1) {
+        state.expandedStores.add(activeStores[0]);
+      }
+      saveCachedDashboard(freshData);
+      applyDashboardData(freshData);
+      closeModal('store-library-modal');
+      showToast(activeStores.length > 0 ? `已啟用 ${activeStores.length} 家今日菜單` : '已清空今日啟用清單');
+    } catch (err) {
+      showToast(`套用失敗：${err.message}`);
+    }
+  }, '<i class="fa-solid fa-spinner fa-spin"></i> 套用中...');
 }
 
-window.confirmDeleteSavedStore = function(storeIdx) {
+window.confirmDeleteSavedStore = function(storeIdx, btnEl) {
   const st = state.savedStores[storeIdx];
   if (!st) return;
+  const lockKey = `del_store_${st.store_name}`;
+  if (state.pendingActions.has(lockKey)) return;
 
-  const doDelete = async () => {
+  const doDelete = () => runWithLock(lockKey, btnEl, async () => {
     try {
-      showToast(`正在刪除「${st.store_name}」...`);
       const freshData = await callGasApi('deleteSavedStore', { store_name: st.store_name });
       state.draftSelectedStores.delete(st.store_name);
       saveCachedDashboard(freshData);
@@ -1150,7 +1365,7 @@ window.confirmDeleteSavedStore = function(storeIdx) {
     } catch (err) {
       showToast(`刪除失敗：${err.message}`);
     }
-  };
+  }, '<i class="fa-solid fa-spinner fa-spin"></i>');
 
   const msg = `確定要從菜單庫永久刪除「${st.store_name}」嗎？（不會影響歷史點餐紀錄與評價）`;
   if (tg && tg.showConfirm) {
@@ -1160,7 +1375,32 @@ window.confirmDeleteSavedStore = function(storeIdx) {
   }
 };
 
-/* ==================== 手動編輯店名、品項與金額 ==================== */
+/* ==================== 手動編輯店名、品項與金額（含菜單庫選單與防連點） ==================== */
+
+function populateStoreDropdown(presetStoreName) {
+  const selectEl = document.getElementById('edit-store-select');
+  const inputEl = document.getElementById('edit-store-name');
+
+  const nameSet = new Set();
+  state.storeOrderList.forEach(n => nameSet.add(n));
+  state.savedStores.forEach(s => { if (s.store_name) nameSet.add(s.store_name); });
+  const allNames = Array.from(nameSet);
+
+  const optionsHtml = [
+    '<option value="__CUSTOM__">＋ 手動輸入新店家...</option>',
+    ...allNames.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`)
+  ].join('');
+
+  selectEl.innerHTML = optionsHtml;
+
+  if (presetStoreName && allNames.includes(presetStoreName)) {
+    selectEl.value = presetStoreName;
+    inputEl.value = presetStoreName;
+  } else {
+    selectEl.value = '__CUSTOM__';
+    inputEl.value = presetStoreName || '';
+  }
+}
 
 window.openRenameStoreModal = function(storeIdx) {
   const oldName = state.storeOrderList[storeIdx];
@@ -1179,26 +1419,29 @@ async function saveStoreRename() {
   }
 
   const btn = document.getElementById('btn-save-store-rename');
-  btn.disabled = true;
-  try {
-    await callGasApi('renameTodayStore', { old_store_name: oldName, new_store_name: newName });
-    state.cart.forEach(c => { if (c.store_name === oldName) c.store_name = newName; });
-    renderCart();
-    closeModal('store-rename-modal');
-    showToast('已更新店家名稱');
-    await initDashboard(false);
-  } catch (err) {
-    showToast(`修改失敗：${err.message}`);
-  } finally {
-    btn.disabled = false;
-  }
+  await runWithLock('renameStore', btn, async () => {
+    try {
+      await callGasApi('renameTodayStore', { old_store_name: oldName, new_store_name: newName });
+      if (state.expandedStores.has(oldName)) {
+        state.expandedStores.delete(oldName);
+        state.expandedStores.add(newName);
+      }
+      state.cart.forEach(c => { if (c.store_name === oldName) c.store_name = newName; });
+      renderCart();
+      closeModal('store-rename-modal');
+      showToast('已更新店家名稱並同步歷史關聯');
+      await initDashboard(false);
+    } catch (err) {
+      showToast(`修改失敗：${err.message}`);
+    }
+  }, '<i class="fa-solid fa-spinner fa-spin"></i> 更新中...');
 }
 
 window.openAddMenuModalForStore = function(storeIdx) {
   const storeName = storeIdx >= 0 ? (state.storeOrderList[storeIdx] || '') : '';
   document.getElementById('menu-modal-title').innerHTML = '<i class="fa-solid fa-plus"></i> 手動新增品項 / 店家備註';
   document.getElementById('edit-menu-id').value = '';
-  document.getElementById('edit-store-name').value = storeName;
+  populateStoreDropdown(storeName);
   document.getElementById('edit-category').value = '主餐';
   document.getElementById('edit-item-name').value = '';
   document.getElementById('edit-price').value = 0;
@@ -1214,7 +1457,7 @@ window.openEditMenuModalById = function(menuId) {
 
   document.getElementById('menu-modal-title').innerHTML = '<i class="fa-solid fa-pen-to-square"></i> 編輯品項與金額';
   document.getElementById('edit-menu-id').value = item.id;
-  document.getElementById('edit-store-name').value = item.store_name;
+  populateStoreDropdown(item.store_name);
   document.getElementById('edit-category').value = item.category;
   document.getElementById('edit-item-name').value = item.item_name;
   document.getElementById('edit-price').value = item.price;
@@ -1241,26 +1484,31 @@ async function saveMenuItemEdit() {
     return;
   }
 
-  const btn = document.getElementById('btn-save-menu-item');
-  btn.disabled = true;
-  try {
-    const action = menuId ? 'updateMenuItem' : 'addMenuItem';
-    await callGasApi(action, payload);
-    closeModal('menu-edit-modal');
-    showToast(menuId ? '已更新品項資料' : '已新增品項至今日菜單');
-    await initDashboard(false);
-  } catch (err) {
-    showToast(`儲存失敗：${err.message}`);
-  } finally {
-    btn.disabled = false;
-  }
+  const saveBtn = document.getElementById('btn-save-menu-item');
+  const delBtn = document.getElementById('btn-delete-menu-item');
+
+  await runWithLock('menuItemMutation', [saveBtn, delBtn], async () => {
+    try {
+      const action = menuId ? 'updateMenuItem' : 'addMenuItem';
+      await callGasApi(action, payload);
+      state.expandedStores.add(payload.store_name);
+      closeModal('menu-edit-modal');
+      showToast(menuId ? '已更新品項資料' : '已新增品項至今日菜單');
+      await initDashboard(false);
+    } catch (err) {
+      showToast(`儲存失敗：${err.message}`);
+    }
+  }, '<i class="fa-solid fa-spinner fa-spin"></i> 儲存中...');
 }
 
-async function deleteEditingMenuItem() {
+function deleteEditingMenuItem() {
   const menuId = document.getElementById('edit-menu-id').value;
-  if (!menuId) return;
+  if (!menuId || state.pendingActions.has('menuItemMutation')) return;
 
-  const doDelete = async () => {
+  const delBtn = document.getElementById('btn-delete-menu-item');
+  const saveBtn = document.getElementById('btn-save-menu-item');
+
+  const doDelete = () => runWithLock('menuItemMutation', [delBtn, saveBtn], async () => {
     try {
       await callGasApi('deleteMenuItem', { menu_id: menuId });
       closeModal('menu-edit-modal');
@@ -1269,7 +1517,7 @@ async function deleteEditingMenuItem() {
     } catch (err) {
       showToast(`刪除失敗：${err.message}`);
     }
-  };
+  }, '<i class="fa-solid fa-spinner fa-spin"></i> 刪除中...');
 
   if (tg && tg.showConfirm) {
     tg.showConfirm('確定要從今日菜單刪除此品項嗎？', ok => { if (ok) doDelete(); });
@@ -1313,10 +1561,69 @@ function bindEvents() {
     btn.addEventListener('click', () => switchTab(btn.dataset.tab));
   });
 
-  document.getElementById('btn-refresh').addEventListener('click', () => initDashboard(true));
+  document.getElementById('btn-refresh').addEventListener('click', () => {
+    const btn = document.getElementById('btn-refresh');
+    runWithLock('refreshDashboard', btn, () => initDashboard(true), '<i class="fa-solid fa-rotate fa-spin"></i>');
+  });
   document.getElementById('btn-fullscreen').addEventListener('click', toggleFullscreen);
   document.getElementById('btn-recommend').addEventListener('click', recommendCombos);
   document.getElementById('btn-add-custom-item').addEventListener('click', () => openAddMenuModalForStore(-1));
+
+  // 菜單價格篩選、排序與一鍵全部展開/收合
+  const priceFilterInput = document.getElementById('menu-max-price');
+  const clearPriceBtn = document.getElementById('btn-clear-price-filter');
+  priceFilterInput.addEventListener('input', () => {
+    const val = Number(priceFilterInput.value);
+    state.menuMaxPrice = val > 0 ? val : null;
+    clearPriceBtn.classList.toggle('hidden', state.menuMaxPrice === null);
+    renderMenus();
+  });
+  clearPriceBtn.addEventListener('click', () => {
+    priceFilterInput.value = '';
+    state.menuMaxPrice = null;
+    clearPriceBtn.classList.add('hidden');
+    renderMenus();
+  });
+  document.getElementById('menu-sort-select').addEventListener('change', (e) => {
+    state.menuSortBy = e.target.value;
+    renderMenus();
+  });
+  document.getElementById('btn-toggle-all-stores').addEventListener('click', () => {
+    const allExpanded = state.storeOrderList.length > 0 &&
+      state.storeOrderList.every(name => state.expandedStores.has(name));
+    if (allExpanded) {
+      state.expandedStores.clear();
+    } else {
+      state.storeOrderList.forEach(name => state.expandedStores.add(name));
+    }
+    renderMenus();
+  });
+
+  // 編輯品項彈窗：店家下拉選單與輸入框雙向同步
+  const storeSelect = document.getElementById('edit-store-select');
+  const storeInput = document.getElementById('edit-store-name');
+  storeSelect.addEventListener('change', () => {
+    if (storeSelect.value === '__CUSTOM__') {
+      storeInput.value = '';
+      storeInput.focus();
+    } else {
+      storeInput.value = storeSelect.value;
+    }
+  });
+  storeInput.addEventListener('input', () => {
+    const typed = storeInput.value.trim();
+    const matchedOpt = [...storeSelect.options].find(o => o.value === typed);
+    storeSelect.value = matchedOpt ? matchedOpt.value : '__CUSTOM__';
+  });
+
+  // 回到頂部按鈕
+  const backToTopBtn = document.getElementById('btn-back-to-top');
+  window.addEventListener('scroll', () => {
+    backToTopBtn.classList.toggle('hidden', window.scrollY < 240);
+  }, { passive: true });
+  backToTopBtn.addEventListener('click', () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
 
   // 購物車展開／收合與複製操作
   document.getElementById('cart-toggle-bar').addEventListener('click', (e) => {
@@ -1329,9 +1636,8 @@ function bindEvents() {
     renderCart();
   });
   document.getElementById('btn-confirm-copy').addEventListener('click', confirmAndCopyOrder);
-  document.getElementById('btn-quick-copy').addEventListener('click', confirmAndCopyOrder);
 
-  // 句尾加謝謝開關（預設開啟並記住偏好）
+  // 句尾加謝謝開關
   const thanksToggle = document.getElementById('toggle-append-thanks');
   const savedThanks = localStorage.getItem('tg_meal_append_thanks');
   if (savedThanks !== null) {
