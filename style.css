@@ -1399,3 +1399,71 @@ input[type="number"]#budget-input {
   color: var(--accent);
   border: 1px solid rgba(56, 189, 248, 0.4);
 }
+
+/* 菜單庫模式切換與批次刪除樣式 */
+.lib-mode-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  background: var(--bg-body);
+  padding: 4px;
+  border-radius: 9px;
+  border: 1px solid var(--border-color);
+  margin-bottom: 10px;
+}
+
+.lib-mode-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  padding: 6px 8px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.lib-mode-btn.active {
+  background: var(--bg-elevated);
+  color: var(--accent);
+}
+
+.lib-mode-btn.active-danger {
+  background: rgba(239, 68, 68, 0.2);
+  color: var(--danger);
+}
+
+.store-lib-quick-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.text-accent-btn {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.store-lib-row.delete-selected {
+  background: rgba(239, 68, 68, 0.14);
+  border-color: var(--danger);
+}
+
+.store-lib-row.delete-selected .store-lib-check {
+  color: var(--danger);
+}
+
+.lib-today-pill {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 99px;
+  background: rgba(16, 185, 129, 0.16);
+  color: var(--success);
+  margin-left: 5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
