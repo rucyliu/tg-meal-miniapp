@@ -27,6 +27,8 @@ const state = {
   appendThanks: true,
   draftSelectedStores: new Set(),
   storeLibSearch: '',
+  storeLibMode: 'active',       // 'active' = 切換今日店家, 'delete' = 批次刪除
+  draftDeleteStores: new Set(),
   pendingActions: new Set(),
   dailyStatuses: {},
   parsedImportOrders: []
@@ -1775,58 +1777,104 @@ window.confirmDeleteReview = async function(reviewId, btnEl) {
   }, '<i class="fa-solid fa-spinner fa-spin"></i>');
 };
 
-/* ==================== 菜單庫挑選與批次切換今日店家 ==================== */
+/* ==================== 菜單庫管理（名稱排序 ＋ 切換今日店家 / 複選批次刪除） ==================== */
 
 window.openStoreLibraryModal = function() {
+  state.storeLibMode = 'active';
   state.storeLibSearch = '';
   document.getElementById('store-lib-search').value = '';
   state.draftSelectedStores = new Set(
     state.savedStores.filter(s => s.is_today).map(s => s.store_name)
   );
+  state.draftDeleteStores = new Set();
+
+  updateStoreLibraryModeUI();
   renderStoreLibraryList();
   document.getElementById('store-library-modal').classList.remove('hidden');
 };
 
+function setStoreLibraryMode(mode) {
+  state.storeLibMode = mode;
+  updateStoreLibraryModeUI();
+  renderStoreLibraryList();
+}
+
+function updateStoreLibraryModeUI() {
+  const isDelete = state.storeLibMode === 'delete';
+
+  const btnActive = document.getElementById('btn-lib-mode-active');
+  const btnDelete = document.getElementById('btn-lib-mode-delete');
+  btnActive.classList.toggle('active', !isDelete);
+  btnDelete.classList.toggle('active-danger', isDelete);
+
+  document.getElementById('btn-store-lib-select-all').classList.toggle('hidden', !isDelete);
+  document.getElementById('btn-apply-store-library').classList.toggle('hidden', isDelete);
+  document.getElementById('btn-batch-delete-stores').classList.toggle('hidden', !isDelete);
+}
+
+function getSortedAndFilteredSavedStores() {
+  const kw = state.storeLibSearch.trim().toLowerCase();
+  return state.savedStores
+    .map((st, idx) => ({ st, idx }))
+    .filter(({ st }) => !kw || st.store_name.toLowerCase().includes(kw))
+    .sort((a, b) => String(a.st.store_name).localeCompare(String(b.st.store_name), 'zh-Hant'));
+}
+
 function renderStoreLibraryList() {
   const listEl = document.getElementById('store-library-list');
   const hintEl = document.getElementById('store-lib-selected-hint');
-  hintEl.textContent = `已勾選 ${state.draftSelectedStores.size} 家（共 ${state.savedStores.length} 家）`;
+  const isDelete = state.storeLibMode === 'delete';
+
+  if (isDelete) {
+    const delCount = state.draftDeleteStores.size;
+    hintEl.textContent = `已選取刪除 ${delCount} 家（共 ${state.savedStores.length} 家）`;
+    const batchDelBtn = document.getElementById('btn-batch-delete-stores');
+    batchDelBtn.disabled = delCount === 0;
+    batchDelBtn.innerHTML = `<i class="fa-solid fa-trash-can"></i> 永久刪除已選 (${delCount} 家)`;
+  } else {
+    hintEl.textContent = `已勾選 ${state.draftSelectedStores.size} 家（共 ${state.savedStores.length} 家）`;
+  }
 
   if (state.savedStores.length === 0) {
     listEl.innerHTML = '<div class="empty-state" style="padding:20px 8px;">菜單庫目前為空，請先轉發一張菜單圖片給 Bot</div>';
     return;
   }
 
-  const kw = state.storeLibSearch.trim().toLowerCase();
-  const rows = state.savedStores
-    .map((st, idx) => ({ st, idx }))
-    .filter(({ st }) => !kw || st.store_name.toLowerCase().includes(kw));
-
+  const rows = getSortedAndFilteredSavedStores();
   if (rows.length === 0) {
     listEl.innerHTML = '<div class="empty-state" style="padding:20px 8px;">找不到符合關鍵字的店家</div>';
     return;
   }
 
   listEl.innerHTML = rows.map(({ st, idx }) => {
-    const isSelected = state.draftSelectedStores.has(st.store_name);
+    const isSelected = isDelete
+      ? state.draftDeleteStores.has(st.store_name)
+      : state.draftSelectedStores.has(st.store_name);
+
+    const rowCls = isSelected ? (isDelete ? 'delete-selected' : 'selected') : '';
     const checkIcon = isSelected ? 'fa-solid fa-square-check' : 'fa-regular fa-square';
     const lastUsedText = st.last_date ? `上次：${escapeHtml(st.last_date)}` : '尚未啟用';
     const ratingStats = getStoreRatingStats(st.store_name);
     const ratingStr = ratingStats.avg !== null ? ` · ★${ratingStats.avg}` : '';
+    const todayPill = st.is_today ? '<span class="lib-today-pill">今日啟用</span>' : '';
+
+    const singleTrashBtn = isDelete
+      ? ''
+      : `<button type="button" class="icon-btn-plain" style="color:var(--danger);"
+           onclick="event.stopPropagation(); confirmDeleteSavedStore(${idx}, this)" title="從菜單庫永久刪除">
+           <i class="fa-solid fa-trash-can"></i>
+         </button>`;
 
     return `
-      <div class="store-lib-row ${isSelected ? 'selected' : ''}" onclick="toggleDraftStore(${idx})">
+      <div class="store-lib-row ${rowCls}" onclick="toggleDraftStore(${idx})">
         <div class="store-lib-left">
           <i class="${checkIcon} store-lib-check"></i>
           <div style="min-width:0;">
-            <div class="store-lib-name">${escapeHtml(st.store_name)}</div>
+            <div class="store-lib-name">${escapeHtml(st.store_name)}${todayPill}</div>
             <div class="item-meta">${st.item_count} 品項 · ${lastUsedText}${ratingStr}</div>
           </div>
         </div>
-        <button type="button" class="icon-btn-plain" style="color:var(--danger);"
-          onclick="event.stopPropagation(); confirmDeleteSavedStore(${idx}, this)" title="從菜單庫永久刪除">
-          <i class="fa-solid fa-trash-can"></i>
-        </button>
+        ${singleTrashBtn}
       </div>`;
   }).join('');
 }
@@ -1834,10 +1882,15 @@ function renderStoreLibraryList() {
 window.toggleDraftStore = function(storeIdx) {
   const st = state.savedStores[storeIdx];
   if (!st) return;
-  if (state.draftSelectedStores.has(st.store_name)) {
-    state.draftSelectedStores.delete(st.store_name);
+
+  const targetSet = state.storeLibMode === 'delete'
+    ? state.draftDeleteStores
+    : state.draftSelectedStores;
+
+  if (targetSet.has(st.store_name)) {
+    targetSet.delete(st.store_name);
   } else {
-    state.draftSelectedStores.add(st.store_name);
+    targetSet.add(st.store_name);
   }
   if (tg && tg.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
   renderStoreLibraryList();
@@ -1863,6 +1916,34 @@ async function applyStoreLibrarySelection() {
   }, '<i class="fa-solid fa-spinner fa-spin"></i> 套用中...');
 }
 
+async function applyBatchDeleteStores() {
+  const targets = Array.from(state.draftDeleteStores);
+  if (targets.length === 0 || state.pendingActions.has('batchDeleteStores')) return;
+
+  const previewNames = targets.slice(0, 5).join('、') + (targets.length > 5 ? ` 等共 ${targets.length} 家` : '');
+  const confirmed = await askConfirm(
+    `確定要從菜單庫永久刪除以下 ${targets.length} 家店家嗎？\n${previewNames}\n\n（不會影響歷史點餐紀錄與評價）`
+  );
+  if (!confirmed) return;
+
+  const btn = document.getElementById('btn-batch-delete-stores');
+  await runWithLock('batchDeleteStores', btn, async () => {
+    try {
+      const freshData = await callGasApi('batchDeleteSavedStores', { store_names: targets });
+      targets.forEach(name => {
+        state.draftSelectedStores.delete(name);
+        state.draftDeleteStores.delete(name);
+      });
+      saveCachedDashboard(freshData);
+      applyDashboardData(freshData);
+      renderStoreLibraryList();
+      showToast(`已從菜單庫永久刪除 ${targets.length} 家店家`);
+    } catch (err) {
+      showToast(`批次刪除失敗：${err.message}`);
+    }
+  }, '<i class="fa-solid fa-spinner fa-spin"></i> 刪除中...');
+}
+
 window.confirmDeleteSavedStore = async function(storeIdx, btnEl) {
   const st = state.savedStores[storeIdx];
   if (!st) return;
@@ -1879,6 +1960,7 @@ window.confirmDeleteSavedStore = async function(storeIdx, btnEl) {
     try {
       const freshData = await callGasApi('deleteSavedStore', { store_name: st.store_name });
       state.draftSelectedStores.delete(st.store_name);
+      state.draftDeleteStores.delete(st.store_name);
       saveCachedDashboard(freshData);
       applyDashboardData(freshData);
       renderStoreLibraryList();
@@ -2169,17 +2251,29 @@ function bindEvents() {
     renderCart();
   });
 
-  // 菜單庫彈窗事件
+  // 菜單庫彈窗事件（含模式切換、全選與批次刪除）
   document.getElementById('btn-open-store-library').addEventListener('click', openStoreLibraryModal);
+  document.getElementById('btn-lib-mode-active').addEventListener('click', () => setStoreLibraryMode('active'));
+  document.getElementById('btn-lib-mode-delete').addEventListener('click', () => setStoreLibraryMode('delete'));
   document.getElementById('store-lib-search').addEventListener('input', (e) => {
     state.storeLibSearch = e.target.value;
     renderStoreLibraryList();
   });
+  document.getElementById('btn-store-lib-select-all').addEventListener('click', () => {
+    if (state.storeLibMode !== 'delete') return;
+    getSortedAndFilteredSavedStores().forEach(({ st }) => state.draftDeleteStores.add(st.store_name));
+    renderStoreLibraryList();
+  });
   document.getElementById('btn-uncheck-all-stores').addEventListener('click', () => {
-    state.draftSelectedStores.clear();
+    if (state.storeLibMode === 'delete') {
+      state.draftDeleteStores.clear();
+    } else {
+      state.draftSelectedStores.clear();
+    }
     renderStoreLibraryList();
   });
   document.getElementById('btn-apply-store-library').addEventListener('click', applyStoreLibrarySelection);
+  document.getElementById('btn-batch-delete-stores').addEventListener('click', applyBatchDeleteStores);
 
   // 歷史評價查詢與篩選
   const searchInput = document.getElementById('review-search-input');
