@@ -9,8 +9,10 @@ const state = {
   hasOrderedToday: false,
   menus: [],
   savedStores: [],
+  storeMeta: {},
   orders: [],
   reviews: [],
+  dailyStatuses: {},
   cart: [],
   cartExpanded: true,
   reviewFilter: 'all',
@@ -20,18 +22,21 @@ const state = {
   storeOrderList: [],
   expandedStores: new Set(),
   hasInitializedExpand: false,
+  menuSearch: '',
   menuMaxPrice: null,
   menuSortBy: 'default',
+  historySearch: '',
+  historyVisibleCount: 20,
   lastRecommended: [],
   pendingToppingItem: null,
   appendThanks: true,
   draftSelectedStores: new Set(),
   storeLibSearch: '',
-  storeLibMode: 'active',       // 'active' = 切換今日店家, 'delete' = 批次刪除
+  storeLibMode: 'active', // 'active' = 切換今日店家, 'delete' = 批次刪除
   draftDeleteStores: new Set(),
-  pendingActions: new Set(),
-  dailyStatuses: {},
-  parsedImportOrders: []
+  parsedImportOrders: [],
+  lightboxZoom: 1,
+  pendingActions: new Set()
 };
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -54,6 +59,10 @@ function escapeHtml(str) {
 
 function normText(str) {
   return String(str || '').replace(/[\s ]+/g, '').toLowerCase();
+}
+
+function getStoreMeta(storeName) {
+  return state.storeMeta[normText(storeName)] || null;
 }
 
 /**
@@ -114,6 +123,7 @@ function persistCurrentStateToCache() {
     hasOrderedToday: state.hasOrderedToday,
     menus: state.menus,
     savedStores: state.savedStores,
+    storeMeta: state.storeMeta,
     orders: state.orders,
     reviews: state.reviews,
     dailyStatuses: state.dailyStatuses
@@ -152,6 +162,7 @@ function applyDashboardData(data) {
   state.hasOrderedToday = Boolean(data.hasOrderedToday);
   state.menus = data.menus || [];
   state.savedStores = data.savedStores || [];
+  state.storeMeta = data.storeMeta || {};
   state.orders = data.orders || [];
   state.reviews = data.reviews || [];
   state.dailyStatuses = data.dailyStatuses || {};
@@ -178,19 +189,8 @@ function applyDashboardData(data) {
 
 /* ==================== 評價與點餐次數統計輔助函式 ==================== */
 
-function getStoreRatingStats(storeName) {
-  const target = normText(storeName);
-  const matched = state.reviews.filter(r => normText(r.store_name) === target);
-  if (matched.length === 0) return { count: 0, avg: null, tags: [] };
-
-  const sum = matched.reduce((acc, r) => acc + Number(r.rating || 0), 0);
-  const avg = Number((sum / matched.length).toFixed(1));
-  const tags = [...new Set(matched.flatMap(r => (r.tags || '').split(/\s+/)).filter(Boolean))].slice(0, 2);
-  return { count: matched.length, avg, tags };
-}
-
 /**
- * 萃取基礎品項名稱（去除括號備註與 +加料），讓「今日點餐」能彙整同一品項不同口味的歷史評價
+ * 萃取基礎品項名稱（去除括號備註與 +加料），讓「今日點餐」能彙整同一品項不同口味的歷史評價與點餐次數
  */
 function extractBaseItemName(itemName) {
   return String(itemName || '')
@@ -219,6 +219,17 @@ function getOrderItemFullName(it) {
     : nameWithToppings;
 }
 
+function getStoreRatingStats(storeName) {
+  const target = normText(storeName);
+  const matched = state.reviews.filter(r => normText(r.store_name) === target);
+  if (matched.length === 0) return { count: 0, avg: null, tags: [] };
+
+  const sum = matched.reduce((acc, r) => acc + Number(r.rating || 0), 0);
+  const avg = Number((sum / matched.length).toFixed(1));
+  const tags = [...new Set(matched.flatMap(r => (r.tags || '').split(/\s+/)).filter(Boolean))].slice(0, 2);
+  return { count: matched.length, avg, tags };
+}
+
 function getItemRatingStats(storeName, itemName) {
   const targetStore = normText(storeName);
   const targetItem = normText(itemName);
@@ -236,26 +247,6 @@ function getItemRatingStats(storeName, itemName) {
   const avg = Number((sum / matched.length).toFixed(1));
   const tags = [...new Set(matched.flatMap(r => (r.tags || '').split(/\s+/)).filter(Boolean))].slice(0, 2);
   return { count: matched.length, avg, tags, latestComment: matched[0].comment || '' };
-}
-
-function findReviewForOrderItem(orderId, it) {
-  const targetStore = normText(it.store_name);
-  const fullNorm = normText(getOrderItemFullName(it));
-  const baseNorm = normText(it.item_name);
-
-  // 先精準比對含備註的完整名稱，再向下相容先前僅存原始品名的舊評價
-  return (
-    state.reviews.find(
-      r => String(r.order_id) === String(orderId) &&
-           normText(r.store_name) === targetStore &&
-           normText(r.item_name) === fullNorm
-    ) ||
-    state.reviews.find(
-      r => String(r.order_id) === String(orderId) &&
-           normText(r.store_name) === targetStore &&
-           normText(r.item_name) === baseNorm
-    )
-  );
 }
 
 function getItemOrderCount(storeName, itemName) {
@@ -279,6 +270,25 @@ function getItemOrderCount(storeName, itemName) {
   return count;
 }
 
+function findReviewForOrderItem(orderId, it) {
+  const targetStore = normText(it.store_name);
+  const fullNorm = normText(getOrderItemFullName(it));
+  const baseNorm = normText(it.item_name);
+
+  return (
+    state.reviews.find(
+      r => String(r.order_id) === String(orderId) &&
+           normText(r.store_name) === targetStore &&
+           normText(r.item_name) === fullNorm
+    ) ||
+    state.reviews.find(
+      r => String(r.order_id) === String(orderId) &&
+           normText(r.store_name) === targetStore &&
+           normText(r.item_name) === baseNorm
+    )
+  );
+}
+
 function getRatingColorClass(avg) {
   if (avg === null) return 'rating-new';
   if (avg >= 4.0) return 'rating-good';
@@ -286,17 +296,17 @@ function getRatingColorClass(avg) {
   return 'rating-bad';
 }
 
-/* ==================== 頂部與今日菜單 ==================== */
+/* ==================== 頂部與今日菜單（關鍵字搜尋、篩選、排序、收合、原圖按鈕） ==================== */
 
 function renderHeader() {
   document.getElementById('today-date').textContent = state.today;
   const badge = document.getElementById('order-status-badge');
   if (state.hasOrderedToday) {
     badge.className = 'status-badge status-done';
-    badge.innerHTML = '<i class="fa-solid fa-circle-check"></i> 今日已點餐';
+    badge.innerHTML = '<i class="fa-solid fa-circle-check"></i> 已點餐';
   } else {
     badge.className = 'status-badge status-pending';
-    badge.innerHTML = '<i class="fa-regular fa-clock"></i> 今日未點餐';
+    badge.innerHTML = '<i class="fa-regular fa-clock"></i> 未點餐';
   }
 }
 
@@ -363,21 +373,46 @@ function renderMenus() {
 
   state.storeOrderList = Object.keys(storeMap);
   const maxPrice = state.menuMaxPrice;
+  const searchKw = state.menuSearch.trim().toLowerCase();
+
+  let renderedStoreCount = 0;
 
   const html = state.storeOrderList.map((storeName, sIdx) => {
     const allStoreRows = storeMap[storeName];
     const storeNotes = allStoreRows.filter(i => i.category === '店家備註');
     const allMenuItems = allStoreRows.filter(i => i.category !== '店家備註');
 
-    const filteredItems = maxPrice !== null
+    let filteredItems = maxPrice !== null
       ? allMenuItems.filter(it => Number(it.price) <= maxPrice)
       : allMenuItems;
 
-    const isExpanded = state.expandedStores.has(storeName);
+    if (searchKw) {
+      const storeMatched = storeName.toLowerCase().includes(searchKw);
+      if (!storeMatched) {
+        filteredItems = filteredItems.filter(it => {
+          const hay = `${it.item_name} ${it.spec} ${it.note} ${it.category}`.toLowerCase();
+          return hay.includes(searchKw);
+        });
+      }
+      if (filteredItems.length === 0) return '';
+    }
+
+    renderedStoreCount++;
+
+    const isExpanded = searchKw ? true : state.expandedStores.has(storeName);
     const chevronClass = isExpanded ? 'fa-chevron-down' : 'fa-chevron-right';
-    const countLabel = maxPrice !== null
+    const isFiltered = maxPrice !== null || Boolean(searchKw);
+    const countLabel = isFiltered
       ? `符合 ${filteredItems.length}/${allMenuItems.length} 項`
       : `${allMenuItems.length} 項`;
+
+    const meta = getStoreMeta(storeName);
+    const origImgBtnHtml = meta && meta.image_file_id
+      ? `<button type="button" class="btn-orig-img"
+           onclick="event.stopPropagation(); openMenuImageLightbox(${sIdx})" title="檢視菜單原圖">
+           <i class="fa-regular fa-image"></i> 原圖
+         </button>`
+      : '';
 
     const storeStats = getStoreRatingStats(storeName);
     let storeRatingHtml = `<span class="rating-badge rating-new"><i class="fa-regular fa-star"></i> 無評價</span>`;
@@ -484,6 +519,7 @@ function renderMenus() {
             <i class="fa-solid ${chevronClass} store-chevron"></i>
             <span class="store-name"><i class="fa-solid fa-store"></i> ${escapeHtml(storeName)}</span>
             <span class="store-count-pill">${countLabel}</span>
+            ${origImgBtnHtml}
             <button class="icon-btn-sm" onclick="event.stopPropagation(); openRenameStoreModal(${sIdx})" title="修改店家名稱">
               <i class="fa-solid fa-pen"></i>
             </button>
@@ -502,7 +538,11 @@ function renderMenus() {
       </section>`;
   }).join('');
 
-  container.innerHTML = html;
+  if (renderedStoreCount === 0 && searchKw) {
+    container.innerHTML = `<div class="empty-state"><p>今日菜單中找不到符合「${escapeHtml(state.menuSearch.trim())}」的品項</p></div>`;
+  } else {
+    container.innerHTML = html;
+  }
   updateToggleAllStoresBtn();
 }
 
@@ -547,6 +587,76 @@ window.jumpToComboItemReview = function(comboIdx, itemIdx) {
   if (!combo || !combo.items || !combo.items[itemIdx]) return;
   navigateToReviewsWithKeyword(combo.items[itemIdx].item_name);
 };
+
+window.jumpToComboStoreReview = function(comboIdx, itemIdx) {
+  const combo = state.lastRecommended[comboIdx];
+  if (!combo || !combo.items || !combo.items[itemIdx]) return;
+  navigateToReviewsWithKeyword(combo.items[itemIdx].store_name);
+};
+
+/* ==================== 菜單原圖燈箱與縮放控制 ==================== */
+
+window.openMenuImageLightbox = function(storeIdx) {
+  const storeName = state.storeOrderList[storeIdx];
+  const meta = getStoreMeta(storeName);
+  if (!meta || !meta.image_file_id) {
+    showToast('此店家目前沒有儲存菜單原圖');
+    return;
+  }
+
+  const fileId = meta.image_file_id;
+  const imgEl = document.getElementById('lightbox-img');
+  const loadingEl = document.getElementById('lightbox-loading');
+  const openLink = document.getElementById('lightbox-open-drive');
+
+  document.getElementById('lightbox-title').innerHTML =
+    `<i class="fa-regular fa-image"></i> ${escapeHtml(storeName)}`;
+  openLink.href = `https://drive.google.com/file/d/${encodeURIComponent(fileId)}/view`;
+
+  state.lightboxZoom = 1;
+  applyLightboxZoomUI();
+
+  imgEl.classList.add('hidden');
+  loadingEl.classList.remove('hidden');
+  loadingEl.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 正在載入菜單原圖...';
+
+  let triedFallback = false;
+  imgEl.onload = () => {
+    loadingEl.classList.add('hidden');
+    imgEl.classList.remove('hidden');
+  };
+  imgEl.onerror = () => {
+    if (!triedFallback) {
+      triedFallback = true;
+      imgEl.src = `https://drive.google.com/thumbnail?id=${encodeURIComponent(fileId)}&sz=w1600`;
+    } else {
+      loadingEl.innerHTML = '圖片載入失敗，請點擊右上角「另開原檔」檢視';
+    }
+  };
+
+  imgEl.src = `https://lh3.googleusercontent.com/d/${encodeURIComponent(fileId)}=w1600`;
+  document.getElementById('image-lightbox-modal').classList.remove('hidden');
+};
+
+function applyLightboxZoomUI() {
+  const imgEl = document.getElementById('lightbox-img');
+  const resetBtn = document.getElementById('lightbox-zoom-reset');
+  const z = state.lightboxZoom;
+
+  resetBtn.textContent = `${Math.round(z * 100)}%`;
+  if (z <= 1) {
+    imgEl.classList.remove('is-zoomed');
+    imgEl.style.width = '100%';
+  } else {
+    imgEl.classList.add('is-zoomed');
+    imgEl.style.width = `${Math.round(z * 100)}%`;
+  }
+}
+
+function adjustLightboxZoom(delta) {
+  state.lightboxZoom = Math.min(3, Math.max(1, Number((state.lightboxZoom + delta).toFixed(2))));
+  applyLightboxZoomUI();
+}
 
 /* ==================== 預算智慧湊單與一鍵隱藏 ==================== */
 
@@ -653,7 +763,10 @@ function recommendCombos() {
           </span>`;
       } else if (sStats.avg !== null) {
         const cls = getRatingColorClass(sStats.avg);
-        ratingPill = `<span class="item-rating-pill ${cls}" onclick="navigateToReviewsWithKeyword(state.lastRecommended[${cIdx}].items[${itemIdx}].store_name)"><i class="fa-solid fa-store"></i> 店均 ${sStats.avg}</span>`;
+        ratingPill = `
+          <span class="item-rating-pill ${cls}" onclick="jumpToComboStoreReview(${cIdx}, ${itemIdx})" title="查看此店歷史評價">
+            <i class="fa-solid fa-store"></i> 店均 ${sStats.avg}
+          </span>`;
       } else {
         ratingPill = `<span class="item-count-zero">尚無評價</span>`;
       }
@@ -705,7 +818,7 @@ window.applyRecommendedCombo = function(idx) {
   showToast('已套用組合，可在下方選擇加料與甜度冰塊');
 };
 
-/* ==================== 購物車、剩餘預算帶入篩選與一鍵清空欄位 ==================== */
+/* ==================== 購物車、剩餘預算篩選、菜單備註與專屬甜度冰量 ==================== */
 
 function createCartEntry(menuItem) {
   return {
@@ -713,7 +826,7 @@ function createCartEntry(menuItem) {
     store_name: menuItem.store_name,
     category: menuItem.category,
     item_name: menuItem.item_name,
-    menu_note: menuItem.note || '', // 保留原菜單備註（例如可選口味說明）
+    menu_note: menuItem.note || '',
     base_price: Number(menuItem.price) || 0,
     extra_price: 0,
     spec: menuItem.spec || '',
@@ -970,9 +1083,6 @@ function updateFormattedPreview() {
   previewEl.rows = Math.max(2, formattedText.split('\n').length);
 }
 
-/**
- * 依據目前預算上限與購物車總額，即時更新「剩餘預算帶入篩選」按鈕
- */
 function updateRemainingBudgetBtn(cartTotalPrice) {
   const btn = document.getElementById('btn-apply-remaining-budget');
   if (!btn) return;
@@ -1090,18 +1200,28 @@ function renderCart() {
         optionsHtml += `<div class="opt-row"><span class="opt-label">已加</span>${extraPills}</div>`;
       }
 
-      const sugarPills = SUGAR_OPTIONS.map(s => `
+      // 優先顯示該店菜單辨識出的專屬甜度與冰量選項，無則使用預設清單
+      const storeMeta = getStoreMeta(entry.store_name);
+      const hasMenuSugar = storeMeta && Array.isArray(storeMeta.sugar_options) && storeMeta.sugar_options.length > 0;
+      const hasMenuIce = storeMeta && Array.isArray(storeMeta.ice_options) && storeMeta.ice_options.length > 0;
+      const sugarList = hasMenuSugar ? storeMeta.sugar_options : SUGAR_OPTIONS;
+      const iceList = hasMenuIce ? storeMeta.ice_options : ICE_OPTIONS;
+
+      const sugarPills = sugarList.map(s => `
         <button type="button" class="opt-pill ${entry.sugar === s ? 'active' : ''}"
-          onclick="toggleCartDrinkOption(${idx}, 'sugar', '${s}')">${s}</button>
+          onclick="toggleCartDrinkOption(${idx}, 'sugar', decodeURIComponent('${encodeURIComponent(s)}'))">${escapeHtml(s)}</button>
       `).join('');
-      const icePills = ICE_OPTIONS.map(ic => `
+      const icePills = iceList.map(ic => `
         <button type="button" class="opt-pill ${entry.ice === ic ? 'active' : ''}"
-          onclick="toggleCartDrinkOption(${idx}, 'ice', '${ic}')">${ic}</button>
+          onclick="toggleCartDrinkOption(${idx}, 'ice', decodeURIComponent('${encodeURIComponent(ic)}'))">${escapeHtml(ic)}</button>
       `).join('');
 
+      const sugarTag = hasMenuSugar ? '<span class="opt-source-tag" title="依該店菜單辨識">菜單</span>' : '';
+      const iceTag = hasMenuIce ? '<span class="opt-source-tag" title="依該店菜單辨識">菜單</span>' : '';
+
       optionsHtml += `
-        <div class="opt-row"><span class="opt-label">甜度</span>${sugarPills}</div>
-        <div class="opt-row"><span class="opt-label">冰量</span>${icePills}</div>`;
+        <div class="opt-row"><span class="opt-label">甜度${sugarTag}</span>${sugarPills}</div>
+        <div class="opt-row"><span class="opt-label">冰量${iceTag}</span>${icePills}</div>`;
     } else {
       const activeNotes = entry.custom_note ? entry.custom_note.split('/').map(s => s.trim()) : [];
       const foodPills = FOOD_QUICK_NOTES.map(fn => `
@@ -1175,13 +1295,9 @@ window.applyStoreNoteToCart = function(cartIdx, storeNoteMenuId) {
   toggleCartQuickNote(cartIdx, sn.item_name, Number(sn.price) || 0);
 };
 
-/**
- * 確認點餐並複製格式（含飲料未選糖度／冰量防呆再確認）
- */
 async function confirmAndCopyOrder() {
   if (state.cart.length === 0 || state.pendingActions.has('createOrder')) return;
 
-  // 檢查購物車內的飲料是否皆已選擇糖度與冰量
   const incompleteDrinks = state.cart.filter(
     e => e.category === '飲料' && (!e.sugar || !e.ice)
   );
@@ -1248,23 +1364,208 @@ async function copyTextToClipboard(text) {
   document.body.removeChild(ta);
 }
 
-/* ==================== 分頁 2：點餐紀錄（鎖定整卡＋立即移除防重複操作） ==================== */
+/* ==================== 本週餐費請領統計（對應前一日訂餐與收據追蹤） ==================== */
+
+function shiftIsoDate(dateStr, deltaDays) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d + deltaDays));
+  const yy = dt.getUTCFullYear();
+  const mm = String(dt.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(dt.getUTCDate()).padStart(2, '0');
+  return `${yy}-${mm}-${dd}`;
+}
+
+function getPrevWorkdayStr(mealDateStr) {
+  const [y, m, d] = mealDateStr.split('-').map(Number);
+  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+  if (dow === 1) return shiftIsoDate(mealDateStr, -3);
+  if (dow === 0) return shiftIsoDate(mealDateStr, -2);
+  return shiftIsoDate(mealDateStr, -1);
+}
+
+function getNextWorkdayStr(orderDateStr) {
+  const [y, m, d] = orderDateStr.split('-').map(Number);
+  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+  if (dow === 5) return shiftIsoDate(orderDateStr, 3);
+  if (dow === 6) return shiftIsoDate(orderDateStr, 2);
+  return shiftIsoDate(orderDateStr, 1);
+}
+
+function getCurrentWeekdaysList() {
+  const baseStr = /^\d{4}-\d{2}-\d{2}$/.test(state.today)
+    ? state.today
+    : new Date().toISOString().slice(0, 10);
+  const [y, m, d] = baseStr.split('-').map(Number);
+  const baseUtc = new Date(Date.UTC(y, m - 1, d));
+  const dow = baseUtc.getUTCDay();
+  const diffToMon = dow === 0 ? -6 : 1 - dow;
+  const labels = ['一', '二', '三', '四', '五'];
+
+  return labels.map((label, i) => {
+    const dt = new Date(baseUtc.getTime() + (diffToMon + i) * 86400000);
+    const yy = dt.getUTCFullYear();
+    const mm = String(dt.getUTCMonth() + 1).padStart(2, '0');
+    const dd = String(dt.getUTCDate()).padStart(2, '0');
+    return { date: `${yy}-${mm}-${dd}`, shortDate: `${mm}/${dd}`, label };
+  });
+}
+
+function renderWeeklyAllowanceCard() {
+  const card = document.getElementById('weekly-allowance-card');
+  if (!card) return;
+
+  const today = state.today;
+  const weekdays = getCurrentWeekdaysList();
+  const orderedDates = new Set(state.orders.map(o => o.date));
+
+  let receiptCount = 0;
+  let pendingReceiptCount = 0;
+  let offWorkCount = 0;
+
+  const daysHtml = weekdays.map(d => {
+    const isToday = d.date === today;
+    const isFuture = Boolean(today && d.date > today);
+    const expectedOrderDate = getPrevWorkdayStr(d.date);
+    const hasCompanyOrder = orderedDates.has(expectedOrderDate);
+    const dayStatus = state.dailyStatuses[d.date] || '';
+
+    let stClass = 'st-future';
+    let stText = '未到';
+    let clickable = true;
+    let tip = '點擊可預先標記未上班';
+
+    if (hasCompanyOrder) {
+      stClass = 'st-ordered';
+      stText = '公司訂';
+      clickable = false;
+      tip = `已於 ${expectedOrderDate} 向公司訂購當日餐點`;
+    } else if (dayStatus === 'receipt') {
+      stClass = 'st-receipt';
+      stText = '已交收據';
+      receiptCount++;
+      tip = '已提供餐點收據（週五可請領），點擊改為未上班';
+    } else if (dayStatus === 'leave') {
+      stClass = 'st-leave';
+      stText = '未上班';
+      offWorkCount++;
+      tip = '已標記未上班（不請領），點擊取消標記';
+    } else if (!isFuture) {
+      stClass = 'st-claimable';
+      stText = '待交收據';
+      pendingReceiptCount++;
+      tip = `${expectedOrderDate} 未跟公司訂餐，點擊標記「已交收據」`;
+    }
+
+    const clickAttr = clickable ? `onclick="cycleWeekdayAllowanceStatus('${d.date}', ${isFuture}, this)"` : '';
+    return `
+      <div class="allowance-day ${stClass} ${clickable ? 'clickable' : ''} ${isToday ? 'is-today' : ''}"
+        ${clickAttr} title="${tip}">
+        <span class="day-label">週${d.label}</span>
+        <span class="day-date">${d.shortDate}</span>
+        <span class="day-state">${stText}</span>
+      </div>`;
+  }).join('');
+
+  const badges = [];
+  if (receiptCount > 0) {
+    badges.push(`<span class="status-badge status-info"><i class="fa-solid fa-coins"></i> 週五可領 ${receiptCount} 天</span>`);
+  }
+  if (pendingReceiptCount > 0) {
+    badges.push(`<span class="status-badge status-pending"><i class="fa-solid fa-receipt"></i> 待交收據 ${pendingReceiptCount} 天</span>`);
+  }
+  if (badges.length === 0) {
+    badges.push(`<span class="status-badge status-done"><i class="fa-solid fa-check"></i> 本週無待領</span>`);
+  }
+
+  card.innerHTML = `
+    <div class="allowance-header">
+      <span class="allowance-title"><i class="fa-solid fa-calendar-week"></i> 本週用餐與請領</span>
+      <div class="allowance-badges">${badges.join('')}</div>
+    </div>
+    <div class="allowance-grid">${daysHtml}</div>
+    <div class="allowance-hint">
+      <i class="fa-regular fa-hand-pointer"></i> 週五訂下週一、平日訂隔日。點擊未訂餐日可依序切換「待交收據 → 已交收據 → 未上班」${offWorkCount > 0 ? `（未上班 ${offWorkCount} 天）` : ''}
+    </div>`;
+}
+
+window.cycleWeekdayAllowanceStatus = async function(dateStr, isFuture, el) {
+  const lockKey = `status_${dateStr}`;
+  if (state.pendingActions.has(lockKey)) return;
+
+  const cur = state.dailyStatuses[dateStr] || '';
+  let nextStatus = '';
+
+  if (isFuture) {
+    nextStatus = cur === 'leave' ? '' : 'leave';
+  } else {
+    if (cur === '') nextStatus = 'receipt';
+    else if (cur === 'receipt') nextStatus = 'leave';
+    else nextStatus = '';
+  }
+
+  if (el) el.classList.add('is-deleting');
+
+  await runWithLock(lockKey, [], async () => {
+    try {
+      if (nextStatus) {
+        state.dailyStatuses[dateStr] = nextStatus;
+      } else {
+        delete state.dailyStatuses[dateStr];
+      }
+      persistCurrentStateToCache();
+      renderWeeklyAllowanceCard();
+
+      const freshData = await callGasApi('setDailyStatus', { date: dateStr, status: nextStatus });
+      saveCachedDashboard(freshData);
+      applyDashboardData(freshData);
+
+      const toastMap = {
+        receipt: `已標記 ${dateStr} 繳交收據（計入週五請領）`,
+        leave: `已標記 ${dateStr} 為未上班（不請領）`,
+        '': `已重設 ${dateStr} 為待交收據`
+      };
+      showToast(toastMap[nextStatus]);
+    } catch (err) {
+      showToast(`更新失敗：${err.message}`);
+      await syncDashboardFromServer(false).catch(() => {});
+    }
+  });
+};
+
+/* ==================== 分頁 2：點餐紀錄（搜尋、20 筆分頁載入、逐品項評價、防連點刪除） ==================== */
 
 function renderHistory() {
   renderWeeklyAllowanceCard();
 
+  const kw = state.historySearch.trim().toLowerCase();
+  const matchedEntries = state.orders
+    .map((ord, oIdx) => ({ ord, oIdx }))
+    .filter(({ ord }) => {
+      if (!kw) return true;
+      const itemsText = (Array.isArray(ord.items) ? ord.items : [])
+        .map(it => `${it.store_name || ''} ${it.item_name || ''} ${it.spec || ''} ${it.note || ''} ${(it.toppings || []).map(t => t.item_name).join(' ')}`)
+        .join(' ');
+      const hay = `${ord.date} ${ord.formatted_text} ${itemsText}`.toLowerCase();
+      return hay.includes(kw);
+    });
+
   const countHint = document.getElementById('history-count-hint');
   if (countHint) {
-    countHint.textContent = `點餐紀錄（共 ${state.orders.length} 筆）`;
+    countHint.textContent = kw
+      ? `符合 ${matchedEntries.length} / ${state.orders.length} 筆紀錄`
+      : `點餐紀錄（共 ${state.orders.length} 筆）`;
   }
 
   const container = document.getElementById('history-container');
-  if (state.orders.length === 0) {
-    container.innerHTML = '<div class="empty-state"><p>尚無點餐紀錄</p></div>';
+  if (matchedEntries.length === 0) {
+    container.innerHTML = `<div class="empty-state"><p>${kw ? '找不到符合關鍵字的點餐紀錄' : '尚無點餐紀錄'}</p></div>`;
     return;
   }
 
-  container.innerHTML = state.orders.map((ord, oIdx) => {
+  const visibleEntries = matchedEntries.slice(0, state.historyVisibleCount);
+  const remainingCount = matchedEntries.length - visibleEntries.length;
+
+  const cardsHtml = visibleEntries.map(({ ord, oIdx }) => {
     const items = Array.isArray(ord.items) ? ord.items : [];
     const itemsHtml = items.map((it, iIdx) => {
       const existingRev = findReviewForOrderItem(ord.order_id, it);
@@ -1320,7 +1621,22 @@ function renderHistory() {
         </div>
       </div>`;
   }).join('');
+
+  const loadMoreHtml = remainingCount > 0
+    ? `<div class="load-more-wrap">
+         <button type="button" class="btn btn-ghost" onclick="loadMoreHistoryOrders()">
+           <i class="fa-solid fa-chevron-down"></i> 載入更多（還有 ${remainingCount} 筆）
+         </button>
+       </div>`
+    : '';
+
+  container.innerHTML = cardsHtml + loadMoreHtml;
 }
+
+window.loadMoreHistoryOrders = function() {
+  state.historyVisibleCount += 20;
+  renderHistory();
+};
 
 window.reCopyOrder = async function(oIdx) {
   const ord = state.orders[oIdx];
@@ -1345,7 +1661,6 @@ window.confirmDeleteOrder = async function(oIdx, btnEl) {
     try {
       await callGasApi('deleteOrder', { order_id: ord.order_id });
 
-      // 後端刪除成功立即從畫面與本地快取移除，杜絕刷新前再次點擊舊卡片
       state.orders = state.orders.filter(o => o.order_id !== ord.order_id);
       state.hasOrderedToday = state.orders.some(o => o.date === state.today);
       persistCurrentStateToCache();
@@ -1354,183 +1669,12 @@ window.confirmDeleteOrder = async function(oIdx, btnEl) {
       renderHistory();
       showToast('已刪除該筆點餐紀錄');
 
-      // 背景靜默與伺服器對齊（不套用舊快取）
       syncDashboardFromServer(false).catch(err => console.warn('背景同步失敗', err));
     } catch (err) {
       if (cardEl && document.body.contains(cardEl)) cardEl.classList.remove('is-deleting');
       showToast(`刪除失敗：${err.message}`);
     }
   }, '<i class="fa-solid fa-spinner fa-spin"></i> 刪除中...');
-};
-
-/* ==================== 本週餐費請領統計（對應前一日訂餐與收據追蹤） ==================== */
-
-function shiftIsoDate(dateStr, deltaDays) {
-  const [y, m, d] = dateStr.split('-').map(Number);
-  const dt = new Date(Date.UTC(y, m - 1, d + deltaDays));
-  const yy = dt.getUTCFullYear();
-  const mm = String(dt.getUTCMonth() + 1).padStart(2, '0');
-  const dd = String(dt.getUTCDate()).padStart(2, '0');
-  return `${yy}-${mm}-${dd}`;
-}
-
-function getPrevWorkdayStr(mealDateStr) {
-  const [y, m, d] = mealDateStr.split('-').map(Number);
-  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay(); // 0=日,1=一...5=五
-  if (dow === 1) return shiftIsoDate(mealDateStr, -3); // 週一用餐查上週五訂餐
-  if (dow === 0) return shiftIsoDate(mealDateStr, -2);
-  return shiftIsoDate(mealDateStr, -1); // 週二~五用餐查前一天訂餐
-}
-
-function getNextWorkdayStr(orderDateStr) {
-  const [y, m, d] = orderDateStr.split('-').map(Number);
-  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
-  if (dow === 5) return shiftIsoDate(orderDateStr, 3); // 週五訂下週一
-  if (dow === 6) return shiftIsoDate(orderDateStr, 2);
-  return shiftIsoDate(orderDateStr, 1);
-}
-
-function getCurrentWeekdaysList() {
-  const baseStr = /^\d{4}-\d{2}-\d{2}$/.test(state.today)
-    ? state.today
-    : new Date().toISOString().slice(0, 10);
-  const [y, m, d] = baseStr.split('-').map(Number);
-  const baseUtc = new Date(Date.UTC(y, m - 1, d));
-  const dow = baseUtc.getUTCDay();
-  const diffToMon = dow === 0 ? -6 : 1 - dow;
-  const labels = ['一', '二', '三', '四', '五'];
-
-  return labels.map((label, i) => {
-    const dt = new Date(baseUtc.getTime() + (diffToMon + i) * 86400000);
-    const yy = dt.getUTCFullYear();
-    const mm = String(dt.getUTCMonth() + 1).padStart(2, '0');
-    const dd = String(dt.getUTCDate()).padStart(2, '0');
-    return { date: `${yy}-${mm}-${dd}`, shortDate: `${mm}/${dd}`, label };
-  });
-}
-
-function renderWeeklyAllowanceCard() {
-  const card = document.getElementById('weekly-allowance-card');
-  if (!card) return;
-
-  const today = state.today;
-  const weekdays = getCurrentWeekdaysList();
-  const orderedDates = new Set(state.orders.map(o => o.date));
-
-  let receiptCount = 0;
-  let pendingReceiptCount = 0;
-  let leaveCount = 0;
-
-  const daysHtml = weekdays.map(d => {
-    const isToday = d.date === today;
-    const isFuture = Boolean(today && d.date > today);
-    const expectedOrderDate = getPrevWorkdayStr(d.date);
-    const hasCompanyOrder = orderedDates.has(expectedOrderDate);
-    const dayStatus = state.dailyStatuses[d.date] || '';
-
-    let stClass = 'st-future';
-    let stText = '未到';
-    let clickable = true;
-    let tip = '點擊可預先標記請假';
-
-    if (hasCompanyOrder) {
-      stClass = 'st-ordered';
-      stText = '公司訂';
-      clickable = false;
-      tip = `已於 ${expectedOrderDate} 向公司訂購當日餐點`;
-    } else if (dayStatus === 'receipt') {
-      stClass = 'st-receipt';
-      stText = '已交收據';
-      receiptCount++;
-      tip = '已提供餐點收據（週五可請領），點擊改為請假';
-    } else if (dayStatus === 'leave') {
-      stClass = 'st-leave';
-      stText = '請假';
-      leaveCount++;
-      tip = '已標記請假（不請領），點擊取消請假';
-    } else if (!isFuture) {
-      stClass = 'st-claimable';
-      stText = '待交收據';
-      pendingReceiptCount++;
-      tip = `${expectedOrderDate} 未跟公司訂餐，點擊標記「已交收據」`;
-    }
-
-    const clickAttr = clickable ? `onclick="cycleWeekdayAllowanceStatus('${d.date}', ${isFuture}, this)"` : '';
-    return `
-      <div class="allowance-day ${stClass} ${clickable ? 'clickable' : ''} ${isToday ? 'is-today' : ''}"
-        ${clickAttr} title="${tip}">
-        <span class="day-label">週${d.label}</span>
-        <span class="day-date">${d.shortDate}</span>
-        <span class="day-state">${stText}</span>
-      </div>`;
-  }).join('');
-
-  const badges = [];
-  if (receiptCount > 0) {
-    badges.push(`<span class="status-badge status-info"><i class="fa-solid fa-coins"></i> 週五可領 ${receiptCount} 天</span>`);
-  }
-  if (pendingReceiptCount > 0) {
-    badges.push(`<span class="status-badge status-pending"><i class="fa-solid fa-receipt"></i> 待交收據 ${pendingReceiptCount} 天</span>`);
-  }
-  if (badges.length === 0) {
-    badges.push(`<span class="status-badge status-done"><i class="fa-solid fa-check"></i> 本週無待領</span>`);
-  }
-
-  card.innerHTML = `
-    <div class="allowance-header">
-      <span class="allowance-title"><i class="fa-solid fa-calendar-week"></i> 本週用餐與請領</span>
-      <div class="allowance-badges">${badges.join('')}</div>
-    </div>
-    <div class="allowance-grid">${daysHtml}</div>
-    <div class="allowance-hint">
-      <i class="fa-regular fa-hand-pointer"></i> 週五訂下週一、平日訂隔日。點擊未訂餐日可依序切換「待交收據 → 已交收據 → 請假」${leaveCount > 0 ? `（請假 ${leaveCount} 天）` : ''}
-    </div>`;
-}
-
-window.cycleWeekdayAllowanceStatus = async function(dateStr, isFuture, el) {
-  const lockKey = `status_${dateStr}`;
-  if (state.pendingActions.has(lockKey)) return;
-
-  const cur = state.dailyStatuses[dateStr] || '';
-  let nextStatus = '';
-
-  if (isFuture) {
-    // 尚未到的日期：未到 ↔ 請假
-    nextStatus = cur === 'leave' ? '' : 'leave';
-  } else {
-    // 今日及過去日期：待交收據('') → 已交收據('receipt') → 請假('leave') → 待交收據('')
-    if (cur === '') nextStatus = 'receipt';
-    else if (cur === 'receipt') nextStatus = 'leave';
-    else nextStatus = '';
-  }
-
-  if (el) el.classList.add('is-deleting');
-
-  await runWithLock(lockKey, [], async () => {
-    try {
-      if (nextStatus) {
-        state.dailyStatuses[dateStr] = nextStatus;
-      } else {
-        delete state.dailyStatuses[dateStr];
-      }
-      persistCurrentStateToCache();
-      renderWeeklyAllowanceCard();
-
-      const freshData = await callGasApi('setDailyStatus', { date: dateStr, status: nextStatus });
-      saveCachedDashboard(freshData);
-      applyDashboardData(freshData);
-
-      const toastMap = {
-        receipt: `已標記 ${dateStr} 繳交收據（計入週五請領）`,
-        leave: `已標記 ${dateStr} 為請假（不請領）`,
-        '': `已重設 ${dateStr} 為待交收據`
-      };
-      showToast(toastMap[nextStatus]);
-    } catch (err) {
-      showToast(`更新失敗：${err.message}`);
-      await syncDashboardFromServer(false).catch(() => {});
-    }
-  });
 };
 
 /* ==================== 手動批次匯入歷史點餐紀錄 ==================== */
@@ -1545,9 +1689,6 @@ function openImportHistoryModal() {
   document.getElementById('import-history-modal').classList.remove('hidden');
 }
 
-/**
- * 解析各種日常群組點餐文字格式（支援空行分段、Telegram 日期標頭、共$150 / 共150$、單行與無價品項）
- */
 function parseHistoryTextBlocks(rawText) {
   const normalized = String(rawText || '')
     .replace(/\r\n/g, '\n')
@@ -1568,7 +1709,6 @@ function parseHistoryTextBlocks(rawText) {
     const keptTextLines = [];
 
     lines.forEach(line => {
-      // 1. 偵測日期列
       const fullDateMatch = line.match(/^\[?(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
       if (fullDateMatch && (line.startsWith('[') || /^\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2}$/.test(line))) {
         orderDate = `${fullDateMatch[1]}-${fullDateMatch[2].padStart(2, '0')}-${fullDateMatch[3].padStart(2, '0')}`;
@@ -1582,14 +1722,12 @@ function parseHistoryTextBlocks(rawText) {
 
       keptTextLines.push(line);
 
-      // 2. 偵測總計列
       const totalMatch = line.match(/^共\s*\$?\s*(\d+)\s*\$?/);
       if (totalMatch) {
         explicitTotal = Number(totalMatch[1]);
         return;
       }
 
-      // 3. 解析單一品項列（支援金額在行尾，或金額後面還接括號備註）
       let clean = line.replace(/\s*(謝謝|感謝)[!！~。.\s]*$/g, '').trim();
       if (!clean) return;
 
@@ -1610,7 +1748,6 @@ function parseHistoryTextBlocks(rawText) {
         rawItem = clean.slice(dashIdx + 1).trim();
       }
 
-      // 只將「最尾端」的小括號拆入 note（如飲料甜度冰量），中間括號原樣留在品名中避免位移
       const trailingNotes = [];
       let itemName = rawItem;
       while (true) {
@@ -1827,7 +1964,6 @@ window.confirmDeleteReview = async function(reviewId, btnEl) {
     try {
       await callGasApi('deleteReview', { review_id: reviewId });
 
-      // 立即從畫面與本地快取移除，避免刷新前可再次點擊
       state.reviews = state.reviews.filter(r => r.review_id !== reviewId);
       persistCurrentStateToCache();
       renderReviewsTab();
@@ -1988,7 +2124,7 @@ async function applyBatchDeleteStores() {
 
   const previewNames = targets.slice(0, 5).join('、') + (targets.length > 5 ? ` 等共 ${targets.length} 家` : '');
   const confirmed = await askConfirm(
-    `確定要從菜單庫永久刪除以下 ${targets.length} 家店家嗎？\n${previewNames}\n\n（不會影響歷史點餐紀錄與評價）`
+    `確定要從菜單庫永久刪除以下 ${targets.length} 家店家嗎？\n${previewNames}\n\n（會一併清理對應的菜單原圖，但不會影響歷史點餐紀錄與評價）`
   );
   if (!confirmed) return;
 
@@ -2016,7 +2152,7 @@ window.confirmDeleteSavedStore = async function(storeIdx, btnEl) {
   const lockKey = `del_store_${st.store_name}`;
   if (state.pendingActions.has(lockKey)) return;
 
-  const confirmed = await askConfirm(`確定要從菜單庫永久刪除「${st.store_name}」嗎？（不會影響歷史點餐紀錄與評價）`);
+  const confirmed = await askConfirm(`確定要從菜單庫永久刪除「${st.store_name}」嗎？（會一併清理菜單原圖，不影響歷史點餐紀錄與評價）`);
   if (!confirmed) return;
 
   const rowEl = btnEl ? btnEl.closest('.store-lib-row') : null;
@@ -2047,7 +2183,7 @@ function populateStoreDropdown(presetStoreName) {
   const nameSet = new Set();
   state.storeOrderList.forEach(n => nameSet.add(n));
   state.savedStores.forEach(s => { if (s.store_name) nameSet.add(s.store_name); });
-  const allNames = Array.from(nameSet);
+  const allNames = Array.from(nameSet).sort((a, b) => String(a).localeCompare(String(b), 'zh-Hant'));
 
   const optionsHtml = [
     '<option value="__CUSTOM__">＋ 手動輸入新店家...</option>',
@@ -2197,7 +2333,8 @@ function switchTab(tabId) {
 }
 
 function closeModal(modalId) {
-  document.getElementById(modalId).classList.add('hidden');
+  const el = document.getElementById(modalId);
+  if (el) el.classList.add('hidden');
 }
 
 function bindEvents() {
@@ -2221,6 +2358,21 @@ function bindEvents() {
   document.getElementById('btn-recommend').addEventListener('click', recommendCombos);
   document.getElementById('btn-clear-recommend').addEventListener('click', clearRecommendedCombos);
   document.getElementById('btn-add-custom-item').addEventListener('click', () => openAddMenuModalForStore(-1));
+
+  // 今日菜單關鍵字搜尋
+  const menuSearchInput = document.getElementById('menu-search-input');
+  const clearMenuSearchBtn = document.getElementById('btn-clear-menu-search');
+  menuSearchInput.addEventListener('input', () => {
+    state.menuSearch = menuSearchInput.value;
+    clearMenuSearchBtn.classList.toggle('hidden', !menuSearchInput.value);
+    renderMenus();
+  });
+  clearMenuSearchBtn.addEventListener('click', () => {
+    menuSearchInput.value = '';
+    state.menuSearch = '';
+    clearMenuSearchBtn.classList.add('hidden');
+    renderMenus();
+  });
 
   // 菜單價格篩選、排序與一鍵全部展開/收合
   const priceFilterInput = document.getElementById('menu-max-price');
@@ -2250,6 +2402,38 @@ function bindEvents() {
       state.storeOrderList.forEach(name => state.expandedStores.add(name));
     }
     renderMenus();
+  });
+
+  // 點餐紀錄關鍵字搜尋（輸入時重置分頁為 20 筆）
+  const historySearchInput = document.getElementById('history-search-input');
+  const clearHistorySearchBtn = document.getElementById('btn-clear-history-search');
+  historySearchInput.addEventListener('input', () => {
+    state.historySearch = historySearchInput.value;
+    state.historyVisibleCount = 20;
+    clearHistorySearchBtn.classList.toggle('hidden', !historySearchInput.value);
+    renderHistory();
+  });
+  clearHistorySearchBtn.addEventListener('click', () => {
+    historySearchInput.value = '';
+    state.historySearch = '';
+    state.historyVisibleCount = 20;
+    clearHistorySearchBtn.classList.add('hidden');
+    renderHistory();
+  });
+
+  // 原菜單圖片燈箱縮放與關閉控制
+  document.getElementById('lightbox-zoom-in').addEventListener('click', () => adjustLightboxZoom(0.5));
+  document.getElementById('lightbox-zoom-out').addEventListener('click', () => adjustLightboxZoom(-0.5));
+  document.getElementById('lightbox-zoom-reset').addEventListener('click', () => {
+    state.lightboxZoom = 1;
+    applyLightboxZoomUI();
+  });
+  document.getElementById('lightbox-img').addEventListener('dblclick', () => {
+    state.lightboxZoom = state.lightboxZoom > 1 ? 1 : 2;
+    applyLightboxZoomUI();
+  });
+  document.getElementById('image-lightbox-modal').addEventListener('click', (e) => {
+    if (e.target.id === 'image-lightbox-modal') closeModal('image-lightbox-modal');
   });
 
   // 編輯品項彈窗：店家下拉選單與輸入框雙向同步
@@ -2317,7 +2501,7 @@ function bindEvents() {
     renderCart();
   });
 
-  // 菜單庫彈窗事件（含模式切換、全選與批次刪除）
+  // 菜單庫彈窗事件（模式切換、全選與批次刪除）
   document.getElementById('btn-open-store-library').addEventListener('click', openStoreLibraryModal);
   document.getElementById('btn-lib-mode-active').addEventListener('click', () => setStoreLibraryMode('active'));
   document.getElementById('btn-lib-mode-delete').addEventListener('click', () => setStoreLibraryMode('delete'));
@@ -2340,6 +2524,11 @@ function bindEvents() {
   });
   document.getElementById('btn-apply-store-library').addEventListener('click', applyStoreLibrarySelection);
   document.getElementById('btn-batch-delete-stores').addEventListener('click', applyBatchDeleteStores);
+
+  // 批次匯入歷史紀錄彈窗事件
+  document.getElementById('btn-open-import-history').addEventListener('click', openImportHistoryModal);
+  document.getElementById('btn-parse-import').addEventListener('click', previewHistoryImport);
+  document.getElementById('btn-confirm-import').addEventListener('click', submitBatchImportOrders);
 
   // 歷史評價查詢與篩選
   const searchInput = document.getElementById('review-search-input');
@@ -2378,10 +2567,6 @@ function bindEvents() {
   document.getElementById('btn-save-store-rename').addEventListener('click', saveStoreRename);
   document.getElementById('btn-save-menu-item').addEventListener('click', saveMenuItemEdit);
   document.getElementById('btn-delete-menu-item').addEventListener('click', deleteEditingMenuItem);
-  // 批次匯入歷史紀錄彈窗事件
-  document.getElementById('btn-open-import-history').addEventListener('click', openImportHistoryModal);
-  document.getElementById('btn-parse-import').addEventListener('click', previewHistoryImport);
-  document.getElementById('btn-confirm-import').addEventListener('click', submitBatchImportOrders);
 
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape') {
@@ -2391,6 +2576,7 @@ function bindEvents() {
       closeModal('topping-target-modal');
       closeModal('store-library-modal');
       closeModal('import-history-modal');
+      closeModal('image-lightbox-modal');
     }
   });
 }
