@@ -1244,3 +1244,135 @@ input[type="number"]#budget-input {
   max-width: 90%;
   text-align: center;
 }
+
+/* 本週餐費請領統計卡 */
+.allowance-card {
+  padding: 12px;
+  margin-bottom: 10px;
+}
+
+.allowance-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.allowance-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.allowance-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.allowance-day {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 6px 3px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  transition: border-color 0.15s ease, transform 0.1s ease;
+}
+
+.allowance-day.clickable {
+  cursor: pointer;
+}
+
+.allowance-day.clickable:active {
+  transform: scale(0.96);
+}
+
+.allowance-day.is-today {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.allowance-day.st-ordered {
+  background: rgba(16, 185, 129, 0.14);
+  border-color: rgba(16, 185, 129, 0.4);
+}
+
+.allowance-day.st-claimable {
+  background: rgba(245, 158, 11, 0.15);
+  border-color: rgba(245, 158, 11, 0.45);
+}
+
+.allowance-day.st-leave {
+  background: rgba(148, 163, 184, 0.12);
+  border-color: rgba(148, 163, 184, 0.35);
+}
+
+.allowance-day.st-future {
+  opacity: 0.65;
+}
+
+.day-label {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.day-date {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.day-state {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 4px;
+  border-radius: 4px;
+  margin-top: 2px;
+}
+
+.st-ordered .day-state { color: var(--success); }
+.st-claimable .day-state { color: var(--warning); }
+.st-leave .day-state { color: var(--text-muted); }
+.st-future .day-state { color: var(--text-muted); }
+
+.allowance-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* 批次匯入預覽清單 */
+.import-preview-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 36vh;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.import-preview-card {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
+.import-preview-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.import-preview-line {
+  color: var(--text-main);
+  padding: 2px 0;
+}
