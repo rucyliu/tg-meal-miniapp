@@ -43,8 +43,14 @@ body.cart-expanded {
 }
 
 button:disabled {
-  opacity: 0.55;
+  opacity: 0.45;
   cursor: not-allowed !important;
+}
+
+.is-deleting {
+  opacity: 0.45;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
 }
 
 /* 頂部列 */
@@ -129,6 +135,9 @@ button:disabled {
   color: var(--text-muted);
   cursor: pointer;
   padding: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 /* 分頁導覽 */
@@ -188,6 +197,12 @@ button:disabled {
   font-weight: 700;
   color: var(--accent);
   font-size: 14px;
+}
+
+.combo-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .input-group {
@@ -328,7 +343,7 @@ input[type="number"]#budget-input {
   font-size: 14px;
 }
 
-/* 推薦組合卡片（含個別金額、評價與點過次數） */
+/* 推薦組合卡片 */
 .combo-results {
   margin-top: 10px;
   display: flex;
@@ -646,16 +661,39 @@ input[type="number"]#budget-input {
 .cart-info {
   display: flex;
   align-items: center;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: 8px;
   font-size: 13px;
   cursor: pointer;
   flex: 1;
+}
+
+.btn-budget-filter {
+  background: rgba(56, 189, 248, 0.16);
+  border: 1px solid rgba(56, 189, 248, 0.45);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 99px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.btn-budget-filter.over-budget {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.35);
+  color: var(--danger);
 }
 
 .cart-summary-actions {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-shrink: 0;
 }
 
 .text-danger-btn {
@@ -734,22 +772,58 @@ input[type="number"]#budget-input {
   font-weight: 600;
 }
 
+/* 購物車備註與加價框（含一鍵清空按鈕） */
 .cart-note-row {
   display: flex;
   gap: 6px;
   margin-top: 4px;
 }
 
-.cart-note-row input[type="text"] {
+.cart-input-wrap {
   flex: 1;
-  padding: 5px 8px;
-  font-size: 12px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  background: var(--bg-body);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding-right: 3px;
 }
 
-.cart-note-row input[type="number"] {
-  width: 72px;
-  padding: 5px 8px;
+.cart-price-wrap {
+  width: 92px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  background: var(--bg-body);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding-right: 3px;
+}
+
+.cart-input-wrap input,
+.cart-price-wrap input {
+  width: 100%;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  padding: 5px 6px 5px 8px;
   font-size: 12px;
+  outline: none;
+}
+
+.clear-field-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 3px 5px;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.clear-field-btn:hover {
+  color: var(--text-main);
 }
 
 .preview-box {
