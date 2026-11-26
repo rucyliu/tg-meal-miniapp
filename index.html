@@ -320,25 +320,43 @@
     </div>
   </div>
 
-  <!-- 彈窗 5：從已存菜單庫勾選今日要點的店家 -->
+  <!-- 彈窗 5：菜單庫（依名稱排序 ＋ 切換今日店家 / 複選批次刪除） -->
   <div id="store-library-modal" class="modal-backdrop hidden">
     <div class="modal-card">
       <div class="modal-header">
-        <h3><i class="fa-solid fa-book-open"></i> 菜單庫（切換今日店家）</h3>
+        <h3><i class="fa-solid fa-book-open"></i> 菜單庫管理</h3>
         <button class="icon-btn" data-close-modal="store-library-modal"><i class="fa-solid fa-xmark"></i></button>
       </div>
       <div class="modal-body">
+        <div class="lib-mode-switch">
+          <button type="button" id="btn-lib-mode-active" class="lib-mode-btn active">
+            <i class="fa-solid fa-calendar-check"></i> 切換今日店家
+          </button>
+          <button type="button" id="btn-lib-mode-delete" class="lib-mode-btn">
+            <i class="fa-solid fa-trash-can"></i> 批次刪除
+          </button>
+        </div>
+
         <div class="search-box">
           <i class="fa-solid fa-magnifying-glass"></i>
-          <input type="text" id="store-lib-search" placeholder="搜尋已存店家名稱..." />
+          <input type="text" id="store-lib-search" placeholder="依名稱搜尋（已按名稱排序，方便找重複）..." />
         </div>
+
         <div class="store-lib-summary">
           <span id="store-lib-selected-hint">已勾選 0 家</span>
-          <button type="button" id="btn-uncheck-all-stores" class="text-danger-btn">全部取消勾選</button>
+          <div class="store-lib-quick-actions">
+            <button type="button" id="btn-store-lib-select-all" class="text-accent-btn hidden">全選</button>
+            <button type="button" id="btn-uncheck-all-stores" class="text-danger-btn">全部取消</button>
+          </div>
         </div>
+
         <div id="store-library-list" class="store-lib-list"></div>
+
         <button id="btn-apply-store-library" class="btn btn-primary btn-block" style="margin-top:12px;">
           <i class="fa-solid fa-check"></i> 套用為今日菜單
+        </button>
+        <button id="btn-batch-delete-stores" class="btn btn-danger btn-block hidden" style="margin-top:12px;" disabled>
+          <i class="fa-solid fa-trash-can"></i> 永久刪除已選 (0 家)
         </button>
       </div>
     </div>
