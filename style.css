@@ -1404,13 +1404,17 @@ input[type="number"]#budget-input {
 /* 菜單庫模式切換與批次刪除樣式 */
 .lib-mode-switch {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 5px;
   background: var(--bg-body);
   padding: 4px;
   border-radius: 9px;
   border: 1px solid var(--border-color);
   margin-bottom: 10px;
+}
+
+#image-lightbox-modal {
+  z-index: 120;
 }
 
 .lib-mode-btn {
@@ -1668,4 +1672,196 @@ input[type="number"]#budget-input {
 
 .variant-edit-btn:hover {
   color: var(--text-main);
+}
+
+/* 菜單庫比對配對面板 */
+.merge-suggestions {
+  background: rgba(56, 189, 248, 0.08);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  border-radius: 8px;
+  padding: 8px;
+  margin-bottom: 10px;
+}
+
+.merge-sug-title {
+  font-size: 11px;
+  color: var(--accent);
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.merge-sug-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.merge-sug-chip {
+  background: var(--bg-elevated);
+  border: 1px solid rgba(56, 189, 248, 0.45);
+  color: var(--text-main);
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.merge-swap-row {
+  text-align: center;
+  margin: -2px 0 8px;
+}
+
+.merge-guide-box {
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--bg-body);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 8px 10px;
+  line-height: 1.5;
+}
+
+/* 差異比對結果視窗 */
+.merge-modal-card {
+  max-width: 540px;
+}
+
+.merge-banner {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.merge-summary-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 10px;
+}
+
+.merge-diff-container {
+  max-height: 44vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-right: 2px;
+}
+
+.merge-section {
+  background: var(--bg-body);
+  border: 1px solid var(--border-color);
+  border-radius: 9px;
+  padding: 8px 10px;
+}
+
+.merge-sec-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  padding-bottom: 5px;
+  border-bottom: 1px dashed var(--border-color);
+}
+
+.merge-sec-title {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.merge-sec-title.t-price { color: var(--warning); }
+.merge-sec-title.t-add { color: var(--success); }
+.merge-sec-title.t-miss { color: var(--danger); }
+.merge-sec-title.t-same { color: var(--text-muted); }
+
+.merge-sec-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.merge-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 5px 2px;
+  border-bottom: 1px dashed rgba(41, 53, 72, 0.55);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.merge-row:last-child {
+  border-bottom: none;
+}
+
+.merge-row input[type="checkbox"] {
+  margin-top: 3px;
+  accent-color: var(--accent);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.merge-row-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.merge-cat-tag {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  margin-right: 4px;
+}
+
+.merge-price-diff {
+  font-weight: 700;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.diff-up { color: var(--danger); }
+.diff-down { color: var(--success); }
+
+.merge-same-list {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.7;
+  margin-top: 4px;
+}
+
+.merge-options-box {
+  margin-top: 10px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.merge-opt-check {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--text-main);
+  cursor: pointer;
+  user-select: none;
+}
+
+.merge-opt-check input[type="checkbox"] {
+  accent-color: var(--accent);
+  cursor: pointer;
 }
