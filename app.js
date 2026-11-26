@@ -27,7 +27,7 @@ const state = {
   appendThanks: true,
   draftSelectedStores: new Set(),
   storeLibSearch: '',
-  pendingActions: new Set() // 全域防連點鎖集合
+  pendingActions: new Set()
 };
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -53,7 +53,22 @@ function normText(str) {
 }
 
 /**
- * 通用防連點執行器：鎖定 actionKey 與指定按鈕（並自動還原文字與狀態）
+ * 統一確認彈窗封裝（支援 Telegram 原生確認框與一般瀏覽器降級）
+ */
+function askConfirm(message) {
+  return new Promise(resolve => {
+    if (tg && typeof tg.showConfirm === 'function') {
+      try {
+        tg.showConfirm(message, ok => resolve(Boolean(ok)));
+        return;
+      } catch (e) {}
+    }
+    resolve(window.confirm(message));
+  });
+}
+
+/**
+ * 通用防連點執行器：鎖定 actionKey 與指定按鈕，結束後還原
  */
 async function runWithLock(actionKey, buttons, asyncFn, loadingHtml = null) {
   if (state.pendingActions.has(actionKey)) return;
@@ -86,6 +101,33 @@ async function runWithLock(actionKey, buttons, asyncFn, loadingHtml = null) {
   }
 }
 
+/**
+ * 將目前記憶體中的 state 回寫至 localStorage（避免刪除或修改後被舊快取蓋回）
+ */
+function persistCurrentStateToCache() {
+  saveCachedDashboard({
+    today: state.today,
+    hasOrderedToday: state.hasOrderedToday,
+    menus: state.menus,
+    savedStores: state.savedStores,
+    orders: state.orders,
+    reviews: state.reviews
+  });
+}
+
+/**
+ * 僅向後端拉取最新資料並刷新畫面（不渲染舊快取，專供異動後同步使用）
+ */
+async function syncDashboardFromServer(showSuccessToast = false) {
+  const freshData = await callGasApi('getDashboardData');
+  saveCachedDashboard(freshData);
+  applyDashboardData(freshData);
+  if (showSuccessToast) showToast('已同步最新菜單與評價');
+}
+
+/**
+ * 初次啟動初始化：先秒開本地快取，再背景同步最新資料
+ */
 async function initDashboard(forceRefresh = false) {
   const cached = loadCachedDashboard();
   if (cached && !forceRefresh) {
@@ -93,10 +135,7 @@ async function initDashboard(forceRefresh = false) {
   }
 
   try {
-    const freshData = await callGasApi('getDashboardData');
-    saveCachedDashboard(freshData);
-    applyDashboardData(freshData);
-    if (forceRefresh) showToast('已同步最新菜單與評價');
+    await syncDashboardFromServer(forceRefresh);
   } catch (err) {
     console.error(err);
     showToast(`同步失敗：${err.message}`);
@@ -111,7 +150,6 @@ function applyDashboardData(data) {
   state.orders = data.orders || [];
   state.reviews = data.reviews || [];
 
-  // 初始化店家收合狀態：僅 1 家店時預設展開，2 家以上預設收合以節省捲動長度
   const uniqueTodayStores = [...new Set(state.menus.map(m => m.store_name).filter(Boolean))];
   if (!state.hasInitializedExpand && uniqueTodayStores.length > 0) {
     state.expandedStores.clear();
@@ -159,9 +197,6 @@ function getItemRatingStats(storeName, itemName) {
   return { count: matched.length, avg, tags, latestComment: matched[0].comment || '' };
 }
 
-/**
- * 統計該店家指定品項在歷史點餐紀錄中被點過的總次數
- */
 function getItemOrderCount(storeName, itemName) {
   const targetStore = normText(storeName);
   const targetItem = normText(itemName);
@@ -196,17 +231,17 @@ function getRatingColorClass(avg) {
   return 'rating-bad';
 }
 
-/* ==================== 頂部與今日菜單（含篩選、排序、收合、點過次數） ==================== */
+/* ==================== 頂部與今日菜單 ==================== */
 
 function renderHeader() {
   document.getElementById('today-date').textContent = state.today;
   const badge = document.getElementById('order-status-badge');
   if (state.hasOrderedToday) {
     badge.className = 'status-badge status-done';
-    badge.innerHTML = '<i class="fa-solid fa-circle-check"></i> 已點餐';
+    badge.innerHTML = '<i class="fa-solid fa-circle-check"></i> 今日已點餐';
   } else {
     badge.className = 'status-badge status-pending';
-    badge.innerHTML = '<i class="fa-regular fa-clock"></i> 未點餐';
+    badge.innerHTML = '<i class="fa-regular fa-clock"></i> 今日未點餐';
   }
 }
 
@@ -279,7 +314,6 @@ function renderMenus() {
     const storeNotes = allStoreRows.filter(i => i.category === '店家備註');
     const allMenuItems = allStoreRows.filter(i => i.category !== '店家備註');
 
-    // 套用價格上限篩選
     const filteredItems = maxPrice !== null
       ? allMenuItems.filter(it => Number(it.price) <= maxPrice)
       : allMenuItems;
@@ -290,7 +324,6 @@ function renderMenus() {
       ? `符合 ${filteredItems.length}/${allMenuItems.length} 項`
       : `${allMenuItems.length} 項`;
 
-    // 店家評價星等（可點擊直接跳轉查詢該店歷史評價）
     const storeStats = getStoreRatingStats(storeName);
     let storeRatingHtml = `<span class="rating-badge rating-new"><i class="fa-regular fa-star"></i> 無評價</span>`;
     if (storeStats.avg !== null) {
@@ -323,7 +356,6 @@ function renderMenus() {
         </div>`;
     }
 
-    // 分類與排序渲染
     const catOrder = ['主餐', '飲料', '單點/配菜', '加料'];
     const catGroups = {};
     filteredItems.forEach(it => {
@@ -344,7 +376,6 @@ function renderMenus() {
             const specText = it.spec ? ` (${escapeHtml(it.spec)})` : '';
             const noteText = it.note ? `<div class="item-meta">${escapeHtml(it.note)}</div>` : '';
 
-            // 歷史評價徽章
             const itemStats = getItemRatingStats(it.store_name, it.item_name);
             let itemReviewPill = '';
             if (itemStats.avg !== null) {
@@ -357,7 +388,6 @@ function renderMenus() {
                 </span>`;
             }
 
-            // 歷史點過次數徽章
             const orderCount = getItemOrderCount(it.store_name, it.item_name);
             const countPill = orderCount > 0
               ? `<span class="item-count-pill" title="歷史點過次數"><i class="fa-solid fa-bag-shopping"></i> 點過 ${orderCount} 次</span>`
@@ -463,11 +493,20 @@ window.jumpToComboItemReview = function(comboIdx, itemIdx) {
   navigateToReviewsWithKeyword(combo.items[itemIdx].item_name);
 };
 
-/* ==================== 預算智慧湊單（顯示個別金額、歷史評價與點過次數） ==================== */
+/* ==================== 預算智慧湊單與一鍵隱藏 ==================== */
+
+function clearRecommendedCombos() {
+  state.lastRecommended = [];
+  const resultBox = document.getElementById('combo-results');
+  resultBox.innerHTML = '';
+  resultBox.classList.add('hidden');
+  document.getElementById('btn-clear-recommend').disabled = true;
+}
 
 function recommendCombos() {
   const budget = Number(document.getElementById('budget-input').value) || 150;
   const resultBox = document.getElementById('combo-results');
+  const clearBtn = document.getElementById('btn-clear-recommend');
 
   const validItems = state.menus.filter(
     item => item.category !== '店家備註' && item.category !== '加料' && item.price > 0 && item.price <= budget
@@ -476,6 +515,7 @@ function recommendCombos() {
   if (validItems.length === 0) {
     resultBox.innerHTML = `<div class="combo-item">找不到 $${budget} 元內的品項，請調高預算。</div>`;
     resultBox.classList.remove('hidden');
+    clearBtn.disabled = false;
     return;
   }
 
@@ -536,6 +576,7 @@ function recommendCombos() {
   if (picked.length === 0) {
     resultBox.innerHTML = `<div class="combo-item">找不到 $${budget} 元內的合適組合，請嘗試調整預算金額。</div>`;
     resultBox.classList.remove('hidden');
+    clearBtn.disabled = false;
     return;
   }
 
@@ -597,6 +638,7 @@ function recommendCombos() {
   }).join('');
 
   resultBox.classList.remove('hidden');
+  clearBtn.disabled = false;
 }
 
 window.applyRecommendedCombo = function(idx) {
@@ -608,7 +650,7 @@ window.applyRecommendedCombo = function(idx) {
   showToast('已套用組合，可在下方選擇加料與甜度冰塊');
 };
 
-/* ==================== 購物車、飲料加料掛載與固定格式輸出 ==================== */
+/* ==================== 購物車、剩餘預算帶入篩選與一鍵清空欄位 ==================== */
 
 function createCartEntry(menuItem) {
   return {
@@ -788,16 +830,35 @@ window.toggleCartQuickNote = function(idx, noteText, extraPrice = 0) {
   renderCart();
 };
 
-window.updateCartCustomNote = function(idx, val) {
+window.updateCartCustomNote = function(idx, inputEl) {
   if (!state.cart[idx]) return;
-  state.cart[idx].custom_note = val;
+  state.cart[idx].custom_note = inputEl.value;
+  const clearBtn = inputEl.parentElement.querySelector('.clear-field-btn');
+  if (clearBtn) clearBtn.classList.toggle('hidden', !inputEl.value);
   updateFormattedPreview();
 };
 
-window.updateCartExtraPrice = function(idx, val) {
+window.clearCartCustomNote = function(idx) {
   if (!state.cart[idx]) return;
-  state.cart[idx].extra_price = Math.max(0, Number(val) || 0);
+  state.cart[idx].custom_note = '';
+  renderCart();
+};
+
+window.updateCartExtraPrice = function(idx, inputEl) {
+  if (!state.cart[idx]) return;
+  const numVal = Math.max(0, Number(inputEl.value) || 0);
+  state.cart[idx].extra_price = numVal;
+  const clearBtn = inputEl.parentElement.querySelector('.clear-field-btn');
+  if (clearBtn) clearBtn.classList.toggle('hidden', numVal <= 0 && !inputEl.value);
+  const priceLabel = document.getElementById(`cart-entry-price-${idx}`);
+  if (priceLabel) priceLabel.textContent = ` $${getCartEntryTotal(state.cart[idx])}`;
   updateCartTotalsAndPreview();
+};
+
+window.clearCartExtraPrice = function(idx) {
+  if (!state.cart[idx]) return;
+  state.cart[idx].extra_price = 0;
+  renderCart();
 };
 
 function buildFormattedOrderText() {
@@ -853,10 +914,62 @@ function updateFormattedPreview() {
   previewEl.rows = Math.max(2, formattedText.split('\n').length);
 }
 
+/**
+ * 依據目前預算上限與購物車總額，即時更新「剩餘預算帶入篩選」按鈕
+ */
+function updateRemainingBudgetBtn(cartTotalPrice) {
+  const btn = document.getElementById('btn-apply-remaining-budget');
+  if (!btn) return;
+
+  const budget = Number(document.getElementById('budget-input').value) || 150;
+  const remaining = budget - cartTotalPrice;
+
+  if (remaining > 0) {
+    btn.disabled = false;
+    btn.classList.remove('over-budget');
+    btn.innerHTML = `<i class="fa-solid fa-filter"></i> 剩$${remaining} 篩選`;
+    btn.dataset.remaining = String(remaining);
+  } else if (remaining === 0) {
+    btn.disabled = true;
+    btn.classList.remove('over-budget');
+    btn.innerHTML = '<i class="fa-solid fa-check"></i> 已滿預算';
+    btn.dataset.remaining = '0';
+  } else {
+    btn.disabled = true;
+    btn.classList.add('over-budget');
+    btn.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> 超支$${Math.abs(remaining)}`;
+    btn.dataset.remaining = '0';
+  }
+}
+
+function applyRemainingBudgetToFilter() {
+  const btn = document.getElementById('btn-apply-remaining-budget');
+  const remaining = Number(btn.dataset.remaining || 0);
+  if (remaining <= 0) return;
+
+  state.menuMaxPrice = remaining;
+  const priceInput = document.getElementById('menu-max-price');
+  priceInput.value = remaining;
+  document.getElementById('btn-clear-price-filter').classList.remove('hidden');
+
+  switchTab('tab-order');
+  state.cartExpanded = false;
+  renderCart();
+  renderMenus();
+
+  const filterBar = document.getElementById('menu-filter-bar');
+  if (filterBar) {
+    filterBar.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+  showToast(`已將剩餘預算 $${remaining} 帶入價格篩選`);
+}
+
 function updateCartTotalsAndPreview() {
   const { formattedText, totalPrice } = buildFormattedOrderText();
   document.getElementById('cart-item-count').textContent = state.cart.length;
   document.getElementById('cart-total-price').textContent = totalPrice;
+  updateRemainingBudgetBtn(totalPrice);
+
   const previewEl = document.getElementById('format-preview');
   previewEl.value = formattedText;
   previewEl.rows = Math.max(2, formattedText.split('\n').length);
@@ -954,13 +1067,16 @@ function renderCart() {
       optionsHtml += `<div class="opt-row"><span class="opt-label">店註</span>${snPills}</div>`;
     }
 
+    const hasNote = Boolean(entry.custom_note);
+    const hasExtra = Number(entry.extra_price) > 0;
+
     return `
       <div class="cart-item-card">
         <div class="cart-item-top">
           <div>
             <span class="cart-store-tag">${escapeHtml(entry.store_name)}</span>
             <strong>${escapeHtml(displayName)}${entry.spec ? ` (${escapeHtml(entry.spec)})` : ''}</strong>
-            <span class="item-meta"> $${itemTotal}</span>
+            <span class="item-meta" id="cart-entry-price-${idx}"> $${itemTotal}</span>
           </div>
           <button type="button" class="icon-btn-plain" style="color:var(--danger);" onclick="removeFromCart(${idx})">
             <i class="fa-solid fa-trash-can"></i>
@@ -968,11 +1084,23 @@ function renderCart() {
         </div>
         ${optionsHtml}
         <div class="cart-note-row">
-          <input type="text" value="${escapeHtml(entry.custom_note)}"
-            placeholder="${isDrink ? '其他備註（選填）' : '餐點備註（如：少飯、沙茶/牛肉）'}"
-            oninput="updateCartCustomNote(${idx}, this.value)" />
-          <input type="number" min="0" step="5" value="${entry.extra_price || ''}" placeholder="+加價"
-            title="額外加價金額" oninput="updateCartExtraPrice(${idx}, this.value)" />
+          <div class="cart-input-wrap">
+            <input type="text" value="${escapeHtml(entry.custom_note)}"
+              placeholder="${isDrink ? '其他備註（選填）' : '餐點備註（如：少飯、沙茶/牛肉）'}"
+              oninput="updateCartCustomNote(${idx}, this)" />
+            <button type="button" class="clear-field-btn ${hasNote ? '' : 'hidden'}"
+              onclick="clearCartCustomNote(${idx})" title="清空備註">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </div>
+          <div class="cart-price-wrap">
+            <input type="number" min="0" step="5" value="${hasExtra ? entry.extra_price : ''}" placeholder="+加價"
+              title="額外加價金額" oninput="updateCartExtraPrice(${idx}, this)" />
+            <button type="button" class="clear-field-btn ${hasExtra ? '' : 'hidden'}"
+              onclick="clearCartExtraPrice(${idx})" title="清空加價">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </div>
         </div>
       </div>`;
   }).join('');
@@ -986,8 +1114,27 @@ window.applyStoreNoteToCart = function(cartIdx, storeNoteMenuId) {
   toggleCartQuickNote(cartIdx, sn.item_name, Number(sn.price) || 0);
 };
 
+/**
+ * 確認點餐並複製格式（含飲料未選糖度／冰量防呆再確認）
+ */
 async function confirmAndCopyOrder() {
-  if (state.cart.length === 0) return;
+  if (state.cart.length === 0 || state.pendingActions.has('createOrder')) return;
+
+  // 檢查購物車內的飲料是否皆已選擇糖度與冰量
+  const incompleteDrinks = state.cart.filter(
+    e => e.category === '飲料' && (!e.sugar || !e.ice)
+  );
+  if (incompleteDrinks.length > 0) {
+    const details = incompleteDrinks.map(e => {
+      const missing = [];
+      if (!e.sugar) missing.push('甜度');
+      if (!e.ice) missing.push('冰量');
+      return `• ${getCartEntryDisplayName(e)}（未選${missing.join('、')}）`;
+    }).join('\n');
+
+    const proceed = await askConfirm(`以下飲料尚未選擇甜度或冰量：\n${details}\n\n確定要直接送出並複製嗎？`);
+    if (!proceed) return;
+  }
 
   const btnMain = document.getElementById('btn-confirm-copy');
   await runWithLock('createOrder', btnMain, async () => {
@@ -1016,7 +1163,7 @@ async function confirmAndCopyOrder() {
       });
       state.cart = [];
       renderCart();
-      await initDashboard(false);
+      await syncDashboardFromServer(false);
     } catch (err) {
       showToast(`紀錄寫入失敗：${err.message}`);
     }
@@ -1040,7 +1187,7 @@ async function copyTextToClipboard(text) {
   document.body.removeChild(ta);
 }
 
-/* ==================== 分頁 2：點餐紀錄（逐一品項獨立評價 ＋ 防連點刪除） ==================== */
+/* ==================== 分頁 2：點餐紀錄（鎖定整卡＋立即移除防重複操作） ==================== */
 
 function renderHistory() {
   const container = document.getElementById('history-container');
@@ -1103,29 +1250,38 @@ window.reCopyOrder = async function(oIdx) {
   showToast('已複製該筆點餐內容');
 };
 
-window.confirmDeleteOrder = function(oIdx, btnEl) {
+window.confirmDeleteOrder = async function(oIdx, btnEl) {
   const ord = state.orders[oIdx];
   if (!ord) return;
   const lockKey = `del_order_${ord.order_id}`;
   if (state.pendingActions.has(lockKey)) return;
 
-  const doDelete = () => runWithLock(lockKey, btnEl, async () => {
+  const confirmed = await askConfirm(`確定要刪除 ${ord.date} 的這筆點餐紀錄嗎？`);
+  if (!confirmed) return;
+
+  const cardEl = btnEl ? btnEl.closest('.history-card') : null;
+  if (cardEl) cardEl.classList.add('is-deleting');
+
+  await runWithLock(lockKey, btnEl, async () => {
     try {
       await callGasApi('deleteOrder', { order_id: ord.order_id });
+
+      // 後端刪除成功立即從畫面與本地快取移除，杜絕刷新前再次點擊舊卡片
+      state.orders = state.orders.filter(o => o.order_id !== ord.order_id);
+      state.hasOrderedToday = state.orders.some(o => o.date === state.today);
+      persistCurrentStateToCache();
+      renderHeader();
+      renderMenus();
+      renderHistory();
       showToast('已刪除該筆點餐紀錄');
-      await initDashboard(false);
+
+      // 背景靜默與伺服器對齊（不套用舊快取）
+      syncDashboardFromServer(false).catch(err => console.warn('背景同步失敗', err));
     } catch (err) {
+      if (cardEl && document.body.contains(cardEl)) cardEl.classList.remove('is-deleting');
       showToast(`刪除失敗：${err.message}`);
     }
   }, '<i class="fa-solid fa-spinner fa-spin"></i> 刪除中...');
-
-  if (tg && tg.showConfirm) {
-    tg.showConfirm(`確定要刪除 ${ord.date} 的這筆點餐紀錄嗎？`, ok => {
-      if (ok) doDelete();
-    });
-  } else if (window.confirm(`確定要刪除 ${ord.date} 的這筆點餐紀錄嗎？`)) {
-    doDelete();
-  }
 };
 
 /* ==================== 單一品項獨立評價彈窗 ==================== */
@@ -1182,14 +1338,14 @@ async function submitReview() {
       });
       closeModal('rating-modal');
       showToast(`已送出「${target.item_name}」的評價！`);
-      await initDashboard(false);
+      await syncDashboardFromServer(false);
     } catch (err) {
       showToast(`評價失敗：${err.message}`);
     }
   }, '<i class="fa-solid fa-spinner fa-spin"></i> 送出中...');
 }
 
-/* ==================== 分頁 3：歷史評價查詢 ==================== */
+/* ==================== 分頁 3：歷史評價查詢（鎖定整卡＋立即移除） ==================== */
 
 function renderReviewsTab() {
   const container = document.getElementById('reviews-container');
@@ -1238,25 +1394,34 @@ function renderReviewsTab() {
   }).join('');
 }
 
-window.confirmDeleteReview = function(reviewId, btnEl) {
+window.confirmDeleteReview = async function(reviewId, btnEl) {
   const lockKey = `del_rev_${reviewId}`;
   if (state.pendingActions.has(lockKey)) return;
 
-  const doDelete = () => runWithLock(lockKey, btnEl, async () => {
+  const confirmed = await askConfirm('確定要刪除這筆評價嗎？');
+  if (!confirmed) return;
+
+  const cardEl = btnEl ? btnEl.closest('.review-card') : null;
+  if (cardEl) cardEl.classList.add('is-deleting');
+
+  await runWithLock(lockKey, btnEl, async () => {
     try {
       await callGasApi('deleteReview', { review_id: reviewId });
+
+      // 立即從畫面與本地快取移除，避免刷新前可再次點擊
+      state.reviews = state.reviews.filter(r => r.review_id !== reviewId);
+      persistCurrentStateToCache();
+      renderReviewsTab();
+      renderMenus();
+      renderHistory();
       showToast('已刪除該筆評價');
-      await initDashboard(false);
+
+      syncDashboardFromServer(false).catch(err => console.warn('背景同步失敗', err));
     } catch (err) {
+      if (cardEl && document.body.contains(cardEl)) cardEl.classList.remove('is-deleting');
       showToast(`刪除失敗：${err.message}`);
     }
   }, '<i class="fa-solid fa-spinner fa-spin"></i>');
-
-  if (tg && tg.showConfirm) {
-    tg.showConfirm('確定要刪除這筆評價嗎？', ok => { if (ok) doDelete(); });
-  } else if (window.confirm('確定要刪除這筆評價嗎？')) {
-    doDelete();
-  }
 };
 
 /* ==================== 菜單庫挑選與批次切換今日店家 ==================== */
@@ -1333,7 +1498,6 @@ async function applyStoreLibrarySelection() {
     try {
       const activeStores = Array.from(state.draftSelectedStores);
       const freshData = await callGasApi('setTodayStores', { active_stores: activeStores });
-      // 套用新店家後：若只有 1 家自動展開，2 家以上預設收合
       state.expandedStores.clear();
       if (activeStores.length === 1) {
         state.expandedStores.add(activeStores[0]);
@@ -1348,13 +1512,19 @@ async function applyStoreLibrarySelection() {
   }, '<i class="fa-solid fa-spinner fa-spin"></i> 套用中...');
 }
 
-window.confirmDeleteSavedStore = function(storeIdx, btnEl) {
+window.confirmDeleteSavedStore = async function(storeIdx, btnEl) {
   const st = state.savedStores[storeIdx];
   if (!st) return;
   const lockKey = `del_store_${st.store_name}`;
   if (state.pendingActions.has(lockKey)) return;
 
-  const doDelete = () => runWithLock(lockKey, btnEl, async () => {
+  const confirmed = await askConfirm(`確定要從菜單庫永久刪除「${st.store_name}」嗎？（不會影響歷史點餐紀錄與評價）`);
+  if (!confirmed) return;
+
+  const rowEl = btnEl ? btnEl.closest('.store-lib-row') : null;
+  if (rowEl) rowEl.classList.add('is-deleting');
+
+  await runWithLock(lockKey, btnEl, async () => {
     try {
       const freshData = await callGasApi('deleteSavedStore', { store_name: st.store_name });
       state.draftSelectedStores.delete(st.store_name);
@@ -1363,19 +1533,13 @@ window.confirmDeleteSavedStore = function(storeIdx, btnEl) {
       renderStoreLibraryList();
       showToast(`已從菜單庫永久刪除「${st.store_name}」`);
     } catch (err) {
+      if (rowEl && document.body.contains(rowEl)) rowEl.classList.remove('is-deleting');
       showToast(`刪除失敗：${err.message}`);
     }
   }, '<i class="fa-solid fa-spinner fa-spin"></i>');
-
-  const msg = `確定要從菜單庫永久刪除「${st.store_name}」嗎？（不會影響歷史點餐紀錄與評價）`;
-  if (tg && tg.showConfirm) {
-    tg.showConfirm(msg, ok => { if (ok) doDelete(); });
-  } else if (window.confirm(msg)) {
-    doDelete();
-  }
 };
 
-/* ==================== 手動編輯店名、品項與金額（含菜單庫選單與防連點） ==================== */
+/* ==================== 手動編輯店名、品項與金額 ==================== */
 
 function populateStoreDropdown(presetStoreName) {
   const selectEl = document.getElementById('edit-store-select');
@@ -1430,7 +1594,7 @@ async function saveStoreRename() {
       renderCart();
       closeModal('store-rename-modal');
       showToast('已更新店家名稱並同步歷史關聯');
-      await initDashboard(false);
+      await syncDashboardFromServer(false);
     } catch (err) {
       showToast(`修改失敗：${err.message}`);
     }
@@ -1494,36 +1658,36 @@ async function saveMenuItemEdit() {
       state.expandedStores.add(payload.store_name);
       closeModal('menu-edit-modal');
       showToast(menuId ? '已更新品項資料' : '已新增品項至今日菜單');
-      await initDashboard(false);
+      await syncDashboardFromServer(false);
     } catch (err) {
       showToast(`儲存失敗：${err.message}`);
     }
   }, '<i class="fa-solid fa-spinner fa-spin"></i> 儲存中...');
 }
 
-function deleteEditingMenuItem() {
+async function deleteEditingMenuItem() {
   const menuId = document.getElementById('edit-menu-id').value;
   if (!menuId || state.pendingActions.has('menuItemMutation')) return;
+
+  const confirmed = await askConfirm('確定要從今日菜單刪除此品項嗎？');
+  if (!confirmed) return;
 
   const delBtn = document.getElementById('btn-delete-menu-item');
   const saveBtn = document.getElementById('btn-save-menu-item');
 
-  const doDelete = () => runWithLock('menuItemMutation', [delBtn, saveBtn], async () => {
+  await runWithLock('menuItemMutation', [delBtn, saveBtn], async () => {
     try {
       await callGasApi('deleteMenuItem', { menu_id: menuId });
+      state.menus = state.menus.filter(m => m.id !== menuId);
+      persistCurrentStateToCache();
+      renderMenus();
       closeModal('menu-edit-modal');
       showToast('已刪除此品項');
-      await initDashboard(false);
+      syncDashboardFromServer(false).catch(err => console.warn('背景同步失敗', err));
     } catch (err) {
       showToast(`刪除失敗：${err.message}`);
     }
   }, '<i class="fa-solid fa-spinner fa-spin"></i> 刪除中...');
-
-  if (tg && tg.showConfirm) {
-    tg.showConfirm('確定要從今日菜單刪除此品項嗎？', ok => { if (ok) doDelete(); });
-  } else if (window.confirm('確定要從今日菜單刪除此品項嗎？')) {
-    doDelete();
-  }
 }
 
 /* ==================== 共用控制與事件綁定 ==================== */
@@ -1537,25 +1701,6 @@ function closeModal(modalId) {
   document.getElementById(modalId).classList.add('hidden');
 }
 
-function toggleFullscreen() {
-  if (!tg) {
-    showToast('請於 Telegram 內開啟以使用全螢幕');
-    return;
-  }
-  try {
-    if (tg.isFullscreen && typeof tg.exitFullscreen === 'function') {
-      tg.exitFullscreen();
-    } else if (typeof tg.requestFullscreen === 'function') {
-      tg.requestFullscreen();
-    } else {
-      tg.expand();
-      showToast('此版本 Telegram 不支援全螢幕 API，已展開至最大高度');
-    }
-  } catch (e) {
-    tg.expand();
-  }
-}
-
 function bindEvents() {
   document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', () => switchTab(btn.dataset.tab));
@@ -1565,8 +1710,17 @@ function bindEvents() {
     const btn = document.getElementById('btn-refresh');
     runWithLock('refreshDashboard', btn, () => initDashboard(true), '<i class="fa-solid fa-rotate fa-spin"></i>');
   });
-  document.getElementById('btn-fullscreen').addEventListener('click', toggleFullscreen);
+
+  // 預算輸入變動時同步更新購物車剩餘預算按鈕
+  document.getElementById('budget-input').addEventListener('input', () => {
+    if (state.cart.length > 0) {
+      const total = state.cart.reduce((sum, e) => sum + getCartEntryTotal(e), 0);
+      updateRemainingBudgetBtn(total);
+    }
+  });
+
   document.getElementById('btn-recommend').addEventListener('click', recommendCombos);
+  document.getElementById('btn-clear-recommend').addEventListener('click', clearRecommendedCombos);
   document.getElementById('btn-add-custom-item').addEventListener('click', () => openAddMenuModalForStore(-1));
 
   // 菜單價格篩選、排序與一鍵全部展開/收合
@@ -1625,11 +1779,15 @@ function bindEvents() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   });
 
-  // 購物車展開／收合與複製操作
+  // 購物車展開／收合、剩餘預算篩選與送出
   document.getElementById('cart-toggle-bar').addEventListener('click', (e) => {
     if (e.target.closest('button') && !e.target.closest('#btn-toggle-cart')) return;
     state.cartExpanded = !state.cartExpanded;
     renderCart();
+  });
+  document.getElementById('btn-apply-remaining-budget').addEventListener('click', (e) => {
+    e.stopPropagation();
+    applyRemainingBudgetToFilter();
   });
   document.getElementById('btn-clear-cart').addEventListener('click', () => {
     state.cart = [];
