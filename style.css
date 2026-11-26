@@ -1376,3 +1376,26 @@ input[type="number"]#budget-input {
   color: var(--text-main);
   padding: 2px 0;
 }
+
+/* 本週餐費統計：已交收據（可請領）狀態 */
+.allowance-day.st-receipt {
+  background: rgba(56, 189, 248, 0.16);
+  border-color: rgba(56, 189, 248, 0.55);
+}
+
+.st-receipt .day-state {
+  color: var(--accent);
+}
+
+.allowance-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  justify-content: flex-end;
+}
+
+.status-info {
+  background: rgba(56, 189, 248, 0.16);
+  color: var(--accent);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+}
