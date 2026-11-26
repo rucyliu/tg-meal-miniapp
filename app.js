@@ -493,7 +493,7 @@ function renderMenus() {
           const rowsHtml = groupedItems.map(group => {
             const firstItem = group.variants[0];
 
-            // 同名品項共用一次歷史評價與點過次數徽章
+            // 歷史評價與點過次數徽章
             const itemStats = getItemRatingStats(group.store_name, group.item_name);
             let itemReviewPill = '';
             if (itemStats.avg !== null) {
@@ -515,32 +515,7 @@ function renderMenus() {
               ? `<div class="item-meta-pills">${itemReviewPill}${countPill}</div>`
               : '';
 
-            // 單一規格：維持原本簡潔的單行排版
-            if (group.variants.length === 1) {
-              const it = firstItem;
-              const specText = it.spec ? ` (${escapeHtml(it.spec)})` : '';
-              const noteText = it.note ? `<div class="item-meta">${escapeHtml(it.note)}</div>` : '';
-
-              return `
-                <div class="menu-row">
-                  <div class="menu-item-info">
-                    <div><strong>${escapeHtml(it.item_name)}${specText}</strong></div>
-                    ${pillsRow}
-                    ${noteText}
-                  </div>
-                  <div class="item-actions">
-                    <span class="item-price">${pricePrefix}${it.price}</span>
-                    <button class="icon-btn-sm" onclick="openEditMenuModalById('${escapeHtml(it.id)}')" title="編輯品項或金額">
-                      <i class="fa-solid fa-pen"></i>
-                    </button>
-                    <button class="qty-btn" onclick="addToCart('${escapeHtml(it.id)}')" title="${addBtnTitle}">
-                      <i class="fa-solid fa-plus"></i>
-                    </button>
-                  </div>
-                </div>`;
-            }
-
-            // 多規格同名品項：合併為一列，下方並列各規格加入／編輯按鈕
+            // 備註彙整（單一與多規格通用）
             const uniqueNotes = [...new Set(group.variants.map(v => String(v.note || '').trim()).filter(Boolean))];
             let notesHtml = '';
             if (uniqueNotes.length === 1) {
@@ -555,6 +530,7 @@ function renderMenus() {
                 .join('');
             }
 
+            // 所有品項統一採用複合按鈕（規格＋金額＋加入｜編輯）
             const variantChipsHtml = group.variants.map(v => {
               const specHtml = v.spec ? `<span class="variant-spec">${escapeHtml(v.spec)}</span>` : '';
               return `
@@ -563,14 +539,14 @@ function renderMenus() {
                     ${specHtml}<span class="variant-price">${pricePrefix}${v.price}</span>
                     <i class="fa-solid fa-plus variant-add-icon"></i>
                   </button>
-                  <button type="button" class="variant-edit-btn" onclick="openEditMenuModalById('${escapeHtml(v.id)}')" title="編輯此規格">
+                  <button type="button" class="variant-edit-btn" onclick="openEditMenuModalById('${escapeHtml(v.id)}')" title="編輯品項或金額">
                     <i class="fa-solid fa-pen"></i>
                   </button>
                 </div>`;
             }).join('');
 
             return `
-              <div class="menu-row menu-row-grouped">
+              <div class="menu-row">
                 <div class="menu-item-info">
                   <div><strong>${escapeHtml(group.item_name)}</strong></div>
                   ${pillsRow}
