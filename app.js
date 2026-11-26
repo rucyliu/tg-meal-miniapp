@@ -1234,10 +1234,14 @@ function renderHistory() {
         </div>`;
     }).join('');
 
+    const mealHint = /^\d{4}-\d{2}-\d{2}$/.test(ord.date)
+      ? ` <span class="item-meta">（${getNextWorkdayStr(ord.date).slice(5).replace('-', '/')} 用餐）</span>`
+      : '';
+
     return `
       <div class="history-card">
         <div class="history-top">
-          <span><i class="fa-regular fa-calendar"></i> ${escapeHtml(ord.date)}</span>
+          <span><i class="fa-regular fa-calendar"></i> ${escapeHtml(ord.date)}${mealHint}</span>
           <strong>總計 $${ord.total_price}</strong>
         </div>
         <div class="history-formatted">${escapeHtml(ord.formatted_text)}</div>
@@ -1295,7 +1299,32 @@ window.confirmDeleteOrder = async function(oIdx, btnEl) {
   }, '<i class="fa-solid fa-spinner fa-spin"></i> 刪除中...');
 };
 
-/* ==================== 本週餐費請領統計與請假切換 ==================== */
+/* ==================== 本週餐費請領統計（對應前一日訂餐與收據追蹤） ==================== */
+
+function shiftIsoDate(dateStr, deltaDays) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d + deltaDays));
+  const yy = dt.getUTCFullYear();
+  const mm = String(dt.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(dt.getUTCDate()).padStart(2, '0');
+  return `${yy}-${mm}-${dd}`;
+}
+
+function getPrevWorkdayStr(mealDateStr) {
+  const [y, m, d] = mealDateStr.split('-').map(Number);
+  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay(); // 0=日,1=一...5=五
+  if (dow === 1) return shiftIsoDate(mealDateStr, -3); // 週一用餐查上週五訂餐
+  if (dow === 0) return shiftIsoDate(mealDateStr, -2);
+  return shiftIsoDate(mealDateStr, -1); // 週二~五用餐查前一天訂餐
+}
+
+function getNextWorkdayStr(orderDateStr) {
+  const [y, m, d] = orderDateStr.split('-').map(Number);
+  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+  if (dow === 5) return shiftIsoDate(orderDateStr, 3); // 週五訂下週一
+  if (dow === 6) return shiftIsoDate(orderDateStr, 2);
+  return shiftIsoDate(orderDateStr, 1);
+}
 
 function getCurrentWeekdaysList() {
   const baseStr = /^\d{4}-\d{2}-\d{2}$/.test(state.today)
@@ -1324,38 +1353,45 @@ function renderWeeklyAllowanceCard() {
   const weekdays = getCurrentWeekdaysList();
   const orderedDates = new Set(state.orders.map(o => o.date));
 
-  let claimableCount = 0;
+  let receiptCount = 0;
+  let pendingReceiptCount = 0;
   let leaveCount = 0;
 
   const daysHtml = weekdays.map(d => {
     const isToday = d.date === today;
-    const isFuture = today && d.date > today;
-    const hasOrder = orderedDates.has(d.date);
-    const isLeave = state.dailyStatuses[d.date] === 'leave';
+    const isFuture = Boolean(today && d.date > today);
+    const expectedOrderDate = getPrevWorkdayStr(d.date);
+    const hasCompanyOrder = orderedDates.has(expectedOrderDate);
+    const dayStatus = state.dailyStatuses[d.date] || '';
 
     let stClass = 'st-future';
     let stText = '未到';
     let clickable = true;
-    let tip = '點擊預排為請假';
+    let tip = '點擊可預先標記請假';
 
-    if (hasOrder) {
+    if (hasCompanyOrder) {
       stClass = 'st-ordered';
       stText = '公司訂';
       clickable = false;
-      tip = '當日已有公司訂餐紀錄';
-    } else if (isLeave) {
+      tip = `已於 ${expectedOrderDate} 向公司訂購當日餐點`;
+    } else if (dayStatus === 'receipt') {
+      stClass = 'st-receipt';
+      stText = '已交收據';
+      receiptCount++;
+      tip = '已提供餐點收據（週五可請領），點擊改為請假';
+    } else if (dayStatus === 'leave') {
       stClass = 'st-leave';
       stText = '請假';
       leaveCount++;
-      tip = '已標記請假（不請領），點擊可取消';
+      tip = '已標記請假（不請領），點擊取消請假';
     } else if (!isFuture) {
       stClass = 'st-claimable';
-      stText = '自訂可領';
-      claimableCount++;
-      tip = '未向公司訂餐（計入可請領），點擊可改為請假';
+      stText = '待交收據';
+      pendingReceiptCount++;
+      tip = `${expectedOrderDate} 未跟公司訂餐，點擊標記「已交收據」`;
     }
 
-    const clickAttr = clickable ? `onclick="toggleWeekdayLeaveStatus('${d.date}', this)"` : '';
+    const clickAttr = clickable ? `onclick="cycleWeekdayAllowanceStatus('${d.date}', ${isFuture}, this)"` : '';
     return `
       <div class="allowance-day ${stClass} ${clickable ? 'clickable' : ''} ${isToday ? 'is-today' : ''}"
         ${clickAttr} title="${tip}">
@@ -1365,34 +1401,51 @@ function renderWeeklyAllowanceCard() {
       </div>`;
   }).join('');
 
-  const summaryBadge = claimableCount > 0
-    ? `<span class="status-badge status-pending"><i class="fa-solid fa-coins"></i> 本週需請領 ${claimableCount} 天</span>`
-    : `<span class="status-badge status-done"><i class="fa-solid fa-check"></i> 本週不需請領</span>`;
+  const badges = [];
+  if (receiptCount > 0) {
+    badges.push(`<span class="status-badge status-info"><i class="fa-solid fa-coins"></i> 週五可領 ${receiptCount} 天</span>`);
+  }
+  if (pendingReceiptCount > 0) {
+    badges.push(`<span class="status-badge status-pending"><i class="fa-solid fa-receipt"></i> 待交收據 ${pendingReceiptCount} 天</span>`);
+  }
+  if (badges.length === 0) {
+    badges.push(`<span class="status-badge status-done"><i class="fa-solid fa-check"></i> 本週無待領</span>`);
+  }
 
   card.innerHTML = `
     <div class="allowance-header">
-      <span class="allowance-title"><i class="fa-solid fa-calendar-week"></i> 本週餐費請領</span>
-      ${summaryBadge}
+      <span class="allowance-title"><i class="fa-solid fa-calendar-week"></i> 本週用餐與請領</span>
+      <div class="allowance-badges">${badges.join('')}</div>
     </div>
     <div class="allowance-grid">${daysHtml}</div>
     <div class="allowance-hint">
-      <i class="fa-regular fa-hand-pointer"></i> 點擊非公司訂餐日期可切換「自訂可領 / 請假（不可領）」${leaveCount > 0 ? ` · 本週請假 ${leaveCount} 天` : ''}
+      <i class="fa-regular fa-hand-pointer"></i> 週五訂下週一、平日訂隔日。點擊未訂餐日可依序切換「待交收據 → 已交收據 → 請假」${leaveCount > 0 ? `（請假 ${leaveCount} 天）` : ''}
     </div>`;
 }
 
-window.toggleWeekdayLeaveStatus = async function(dateStr, el) {
+window.cycleWeekdayAllowanceStatus = async function(dateStr, isFuture, el) {
   const lockKey = `status_${dateStr}`;
   if (state.pendingActions.has(lockKey)) return;
 
-  const isCurrentlyLeave = state.dailyStatuses[dateStr] === 'leave';
-  const nextStatus = isCurrentlyLeave ? '' : 'leave';
+  const cur = state.dailyStatuses[dateStr] || '';
+  let nextStatus = '';
+
+  if (isFuture) {
+    // 尚未到的日期：未到 ↔ 請假
+    nextStatus = cur === 'leave' ? '' : 'leave';
+  } else {
+    // 今日及過去日期：待交收據('') → 已交收據('receipt') → 請假('leave') → 待交收據('')
+    if (cur === '') nextStatus = 'receipt';
+    else if (cur === 'receipt') nextStatus = 'leave';
+    else nextStatus = '';
+  }
+
   if (el) el.classList.add('is-deleting');
 
   await runWithLock(lockKey, [], async () => {
     try {
-      // 樂觀更新畫面並寫入後端
-      if (nextStatus === 'leave') {
-        state.dailyStatuses[dateStr] = 'leave';
+      if (nextStatus) {
+        state.dailyStatuses[dateStr] = nextStatus;
       } else {
         delete state.dailyStatuses[dateStr];
       }
@@ -1402,7 +1455,13 @@ window.toggleWeekdayLeaveStatus = async function(dateStr, el) {
       const freshData = await callGasApi('setDailyStatus', { date: dateStr, status: nextStatus });
       saveCachedDashboard(freshData);
       applyDashboardData(freshData);
-      showToast(nextStatus === 'leave' ? `已標記 ${dateStr} 為請假（不請領）` : `已取消 ${dateStr} 請假標記`);
+
+      const toastMap = {
+        receipt: `已標記 ${dateStr} 繳交收據（計入週五請領）`,
+        leave: `已標記 ${dateStr} 為請假（不請領）`,
+        '': `已重設 ${dateStr} 為待交收據`
+      };
+      showToast(toastMap[nextStatus]);
     } catch (err) {
       showToast(`更新失敗：${err.message}`);
       await syncDashboardFromServer(false).catch(() => {});
