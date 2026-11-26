@@ -1467,3 +1467,22 @@ input[type="number"]#budget-input {
   font-weight: 600;
   white-space: nowrap;
 }
+
+/* 購物車內顯示原菜單品項備註（如可選口味說明） */
+.cart-menu-note {
+  background: rgba(56, 189, 248, 0.08);
+  border-left: 3px solid var(--accent);
+  border-radius: 4px;
+  padding: 4px 8px;
+  margin-bottom: 6px;
+  font-size: 11px;
+  color: #bae6fd;
+  line-height: 1.4;
+}
+
+/* 點餐紀錄中的規格與備註顯示 */
+.history-note-badge {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-left: 4px;
+}
