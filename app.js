@@ -2,7 +2,7 @@ const tg = window.Telegram ? window.Telegram.WebApp : null;
 
 const SUGAR_OPTIONS = ['無糖', '1分糖', '微糖', '半糖', '少糖'];
 const ICE_OPTIONS = ['去冰', '微冰', '少冰', '常溫', '熱飲'];
-const FOOD_QUICK_NOTES = ['少飯', '加辣'];
+const FOOD_QUICK_NOTES = ['少飯', '不辣', '小辣'];
 
 const state = {
   today: '',
@@ -32,10 +32,11 @@ const state = {
   appendThanks: true,
   draftSelectedStores: new Set(),
   storeLibSearch: '',
-  storeLibMode: 'active', // 'active' = 切換今日店家, 'delete' = 批次刪除
+  storeLibMode: 'active', // 'active' = 今日店家, 'merge' = 比對合併, 'delete' = 批次刪除
   draftDeleteStores: new Set(),
   parsedImportOrders: [],
   lightboxZoom: 1,
+  mergeContext: null,
   pendingActions: new Set()
 };
 
@@ -296,7 +297,7 @@ function getRatingColorClass(avg) {
   return 'rating-bad';
 }
 
-/* ==================== 頂部與今日菜單（關鍵字搜尋、篩選、排序、收合、原圖按鈕） ==================== */
+/* ==================== 頂部與今日菜單（關鍵字搜尋、篩選、排序、同名合併、原圖按鈕） ==================== */
 
 function renderHeader() {
   document.getElementById('today-date').textContent = state.today;
@@ -493,7 +494,6 @@ function renderMenus() {
           const rowsHtml = groupedItems.map(group => {
             const firstItem = group.variants[0];
 
-            // 歷史評價與點過次數徽章
             const itemStats = getItemRatingStats(group.store_name, group.item_name);
             let itemReviewPill = '';
             if (itemStats.avg !== null) {
@@ -515,7 +515,6 @@ function renderMenus() {
               ? `<div class="item-meta-pills">${itemReviewPill}${countPill}</div>`
               : '';
 
-            // 備註彙整（單一與多規格通用）
             const uniqueNotes = [...new Set(group.variants.map(v => String(v.note || '').trim()).filter(Boolean))];
             let notesHtml = '';
             if (uniqueNotes.length === 1) {
@@ -530,7 +529,7 @@ function renderMenus() {
                 .join('');
             }
 
-            // 所有品項統一採用複合按鈕（規格＋金額＋加入｜編輯）
+            // 統一採用單列靠右複合按鈕（規格＋金額＋加入｜編輯）
             const variantChipsHtml = group.variants.map(v => {
               const specHtml = v.spec ? `<span class="variant-spec">${escapeHtml(v.spec)}</span>` : '';
               return `
@@ -652,14 +651,20 @@ window.openMenuImageLightbox = function(storeIdx) {
     showToast('此店家目前沒有儲存菜單原圖');
     return;
   }
+  openImageLightboxByFileId(storeName, meta.image_file_id);
+};
 
-  const fileId = meta.image_file_id;
+window.openImageLightboxByFileId = function(title, fileId) {
+  if (!fileId) {
+    showToast('目前沒有儲存菜單原圖');
+    return;
+  }
   const imgEl = document.getElementById('lightbox-img');
   const loadingEl = document.getElementById('lightbox-loading');
   const openLink = document.getElementById('lightbox-open-drive');
 
   document.getElementById('lightbox-title').innerHTML =
-    `<i class="fa-regular fa-image"></i> ${escapeHtml(storeName)}`;
+    `<i class="fa-regular fa-image"></i> ${escapeHtml(title)}`;
   openLink.href = `https://drive.google.com/file/d/${encodeURIComponent(fileId)}/view`;
 
   state.lightboxZoom = 1;
@@ -2028,7 +2033,7 @@ window.confirmDeleteReview = async function(reviewId, btnEl) {
   }, '<i class="fa-solid fa-spinner fa-spin"></i>');
 };
 
-/* ==================== 菜單庫管理（名稱排序 ＋ 切換今日店家 / 複選批次刪除） ==================== */
+/* ==================== 菜單庫管理（今日店家 / 比對合併 / 複選批次刪除） ==================== */
 
 window.openStoreLibraryModal = function() {
   state.storeLibMode = 'active';
@@ -2047,19 +2052,28 @@ window.openStoreLibraryModal = function() {
 function setStoreLibraryMode(mode) {
   state.storeLibMode = mode;
   updateStoreLibraryModeUI();
-  renderStoreLibraryList();
+  if (mode === 'merge') {
+    populateMergeSelectors();
+  } else {
+    renderStoreLibraryList();
+  }
 }
 
 function updateStoreLibraryModeUI() {
-  const isDelete = state.storeLibMode === 'delete';
+  const mode = state.storeLibMode;
+  const isActive = mode === 'active';
+  const isMerge = mode === 'merge';
+  const isDelete = mode === 'delete';
 
-  const btnActive = document.getElementById('btn-lib-mode-active');
-  const btnDelete = document.getElementById('btn-lib-mode-delete');
-  btnActive.classList.toggle('active', !isDelete);
-  btnDelete.classList.toggle('active-danger', isDelete);
+  document.getElementById('btn-lib-mode-active').classList.toggle('active', isActive);
+  document.getElementById('btn-lib-mode-merge').classList.toggle('active', isMerge);
+  document.getElementById('btn-lib-mode-delete').classList.toggle('active-danger', isDelete);
+
+  document.getElementById('store-lib-list-panel').classList.toggle('hidden', isMerge);
+  document.getElementById('store-lib-merge-panel').classList.toggle('hidden', !isMerge);
 
   document.getElementById('btn-store-lib-select-all').classList.toggle('hidden', !isDelete);
-  document.getElementById('btn-apply-store-library').classList.toggle('hidden', isDelete);
+  document.getElementById('btn-apply-store-library').classList.toggle('hidden', !isActive);
   document.getElementById('btn-batch-delete-stores').classList.toggle('hidden', !isDelete);
 }
 
@@ -2222,6 +2236,460 @@ window.confirmDeleteSavedStore = async function(storeIdx, btnEl) {
     }
   }, '<i class="fa-solid fa-spinner fa-spin"></i>');
 };
+
+/* ==================== 菜單庫差異比對與合併 ==================== */
+
+function populateMergeSelectors() {
+  const sorted = [...state.savedStores].sort((a, b) =>
+    String(a.store_name).localeCompare(String(b.store_name), 'zh-Hant')
+  );
+
+  const baseSelect = document.getElementById('merge-base-select');
+  const sourceSelect = document.getElementById('merge-source-select');
+  const startBtn = document.getElementById('btn-start-store-compare');
+
+  if (sorted.length < 2) {
+    const emptyOpt = '<option value="">菜單庫需至少有 2 家店才可比對</option>';
+    baseSelect.innerHTML = emptyOpt;
+    sourceSelect.innerHTML = emptyOpt;
+    startBtn.disabled = true;
+    document.getElementById('merge-suggestions').classList.add('hidden');
+    return;
+  }
+
+  startBtn.disabled = false;
+  const optionsHtml = sorted.map(st => {
+    const todayMark = st.is_today ? ' [今日]' : '';
+    return `<option value="${escapeHtml(st.store_name)}">${escapeHtml(st.store_name)}（${st.item_count} 項${todayMark}）</option>`;
+  }).join('');
+
+  baseSelect.innerHTML = optionsHtml;
+  sourceSelect.innerHTML = optionsHtml;
+
+  // 自動偵測疑似同名或編號成對店家（如「鶴茶樓」與「鶴茶樓 (2)」或「🔍 疑似：鶴茶樓」）
+  const nameList = sorted.map(s => s.store_name);
+  const nameNormMap = new Map(nameList.map(n => [normText(n), n]));
+  const pairs = [];
+  const pairSeen = new Set();
+
+  nameList.forEach(name => {
+    const numMatch = name.match(/^(.+?)\s*\(\d+\)$/);
+    const cleanGuess = name.replace(/^🔍\s*疑似[:：]\s*/, '').replace(/\s*\(\d+\)$/, '').trim();
+
+    let candidateBase = '';
+    if (numMatch && nameNormMap.has(normText(numMatch[1]))) {
+      candidateBase = nameNormMap.get(normText(numMatch[1]));
+    } else if (cleanGuess !== name && nameNormMap.has(normText(cleanGuess))) {
+      candidateBase = nameNormMap.get(normText(cleanGuess));
+    }
+
+    if (candidateBase && candidateBase !== name) {
+      const pKey = `${candidateBase}||${name}`;
+      if (!pairSeen.has(pKey)) {
+        pairSeen.add(pKey);
+        pairs.push({ base: candidateBase, source: name });
+      }
+    }
+  });
+
+  const sugBox = document.getElementById('merge-suggestions');
+  if (pairs.length > 0) {
+    sugBox.innerHTML = `
+      <div class="merge-sug-title"><i class="fa-solid fa-wand-magic-sparkles"></i> 偵測到疑似重複店家（點擊快速帶入）</div>
+      <div class="merge-sug-list">
+        ${pairs.map(p => `
+          <button type="button" class="merge-sug-chip"
+            onclick="pickMergePair(decodeURIComponent('${encodeURIComponent(p.base)}'), decodeURIComponent('${encodeURIComponent(p.source)}'))">
+            ${escapeHtml(p.base)} ← ${escapeHtml(p.source)}
+          </button>`).join('')}
+      </div>`;
+    sugBox.classList.remove('hidden');
+    baseSelect.value = pairs[0].base;
+    sourceSelect.value = pairs[0].source;
+  } else {
+    sugBox.classList.add('hidden');
+    baseSelect.selectedIndex = 0;
+    sourceSelect.selectedIndex = 1;
+  }
+}
+
+window.pickMergePair = function(baseName, sourceName) {
+  document.getElementById('merge-base-select').value = baseName;
+  document.getElementById('merge-source-select').value = sourceName;
+};
+
+function swapMergeSelectors() {
+  const baseEl = document.getElementById('merge-base-select');
+  const srcEl = document.getElementById('merge-source-select');
+  const tmp = baseEl.value;
+  baseEl.value = srcEl.value;
+  srcEl.value = tmp;
+}
+
+async function startStoreCompare() {
+  const baseStore = document.getElementById('merge-base-select').value;
+  const sourceStore = document.getElementById('merge-source-select').value;
+
+  if (!baseStore || !sourceStore) {
+    showToast('請選擇基準店與來源店');
+    return;
+  }
+  if (normText(baseStore) === normText(sourceStore)) {
+    showToast('基準店與來源店不可選擇同一家');
+    return;
+  }
+
+  const btn = document.getElementById('btn-start-store-compare');
+  await runWithLock('compareStores', btn, async () => {
+    try {
+      const data = await callGasApi('getStoresForCompare', {
+        base_store: baseStore,
+        source_store: sourceStore
+      });
+      const diff = computeStoreMenuDiff(data.base_items || [], data.source_items || []);
+      state.mergeContext = {
+        base_store: data.base_store,
+        source_store: data.source_store,
+        base_meta: data.base_meta,
+        source_meta: data.source_meta,
+        diff: diff
+      };
+      renderMergeDiffModal(false);
+      closeModal('store-library-modal');
+      document.getElementById('menu-merge-modal').classList.remove('hidden');
+    } catch (err) {
+      showToast(`讀取菜單比對失敗：${err.message}`);
+    }
+  }, '<i class="fa-solid fa-spinner fa-spin"></i> 正在比對差異...');
+}
+
+/**
+ * 核心比對演算法：以「標準化品名 + 規格」配對，忽略分類與備註以保留手工整理成果
+ */
+function computeStoreMenuDiff(baseItems, sourceItems) {
+  const makeKey = it => `${normText(it.item_name)}|${normText(it.spec)}`;
+
+  // 1. 先對來源新菜單做一次自身去重（消除推薦榜重複）
+  const dedupSourceMap = new Map();
+  sourceItems.forEach(it => {
+    const key = makeKey(it);
+    if (!dedupSourceMap.has(key)) {
+      dedupSourceMap.set(key, it);
+    } else {
+      const prev = dedupSourceMap.get(key);
+      if ((!prev.note && it.note) || ((Number(prev.price) || 0) === 0 && (Number(it.price) || 0) > 0)) {
+        dedupSourceMap.set(key, it);
+      }
+    }
+  });
+  const cleanSourceItems = Array.from(dedupSourceMap.values());
+
+  // 2. 將基準店品項依 key 建佇列（保留既有順序）
+  const baseBuckets = new Map();
+  baseItems.forEach(it => {
+    const key = makeKey(it);
+    if (!baseBuckets.has(key)) baseBuckets.set(key, []);
+    baseBuckets.get(key).push(it);
+  });
+
+  const priceChanged = [];
+  const added = [];
+  const unchanged = [];
+  const matchedBaseIds = new Set();
+
+  cleanSourceItems.forEach(src => {
+    const key = makeKey(src);
+    const bucket = baseBuckets.get(key);
+    const baseMatch = bucket ? bucket.find(b => !matchedBaseIds.has(b.id)) : null;
+
+    if (baseMatch) {
+      matchedBaseIds.add(baseMatch.id);
+      if (Number(baseMatch.price) !== Number(src.price)) {
+        priceChanged.push({
+          base: baseMatch,
+          source: src,
+          checked: true
+        });
+      } else {
+        unchanged.push(baseMatch);
+      }
+    } else {
+      added.push({
+        source: src,
+        checked: true
+      });
+    }
+  });
+
+  const missingInSource = baseItems
+    .filter(b => !matchedBaseIds.has(b.id))
+    .map(b => ({
+      base: b,
+      checked: false
+    }));
+
+  return { priceChanged, added, missingInSource, unchanged };
+}
+
+function renderMergeDiffModal(preserveBottomOptions = false) {
+  const ctx = state.mergeContext;
+  if (!ctx) return;
+
+  const { base_store, source_store, source_meta, diff } = ctx;
+  const srcImgId = source_meta && source_meta.image_file_id ? source_meta.image_file_id : '';
+  const srcHasDrinkOpts = Boolean(
+    source_meta &&
+    ((Array.isArray(source_meta.sugar_options) && source_meta.sugar_options.length > 0) ||
+     (Array.isArray(source_meta.ice_options) && source_meta.ice_options.length > 0))
+  );
+
+  const viewSrcImgBtn = srcImgId
+    ? `<button type="button" class="btn-orig-img"
+         onclick="openImageLightboxByFileId(decodeURIComponent('${encodeURIComponent(source_store + '（新原圖）')}'), '${escapeHtml(srcImgId)}')">
+         <i class="fa-regular fa-image"></i> 看新菜單原圖
+       </button>`
+    : '';
+
+  document.getElementById('merge-banner').innerHTML = `
+    <div>
+      基準：<strong>${escapeHtml(base_store)}</strong>
+      <i class="fa-solid fa-arrow-left" style="margin:0 4px;color:var(--accent);"></i>
+      來源：<strong>${escapeHtml(source_store)}</strong>
+    </div>
+    ${viewSrcImgBtn}`;
+
+  document.getElementById('merge-summary-pills').innerHTML = `
+    <span class="rating-badge rating-mid">價格變動 ${diff.priceChanged.length}</span>
+    <span class="rating-badge rating-good">新增品項 ${diff.added.length}</span>
+    <span class="rating-badge rating-bad">舊有未見 ${diff.missingInSource.length}</span>
+    <span class="rating-badge rating-new">完全一致 ${diff.unchanged.length}</span>`;
+
+  const sectionsHtml = [];
+
+  // 1. 價格變動
+  if (diff.priceChanged.length > 0) {
+    const rows = diff.priceChanged.map((row, i) => {
+      const delta = Number(row.source.price) - Number(row.base.price);
+      const deltaCls = delta > 0 ? 'diff-up' : 'diff-down';
+      const deltaTxt = delta > 0 ? `+${delta}` : `${delta}`;
+      const specTxt = row.base.spec ? ` (${escapeHtml(row.base.spec)})` : '';
+      return `
+        <label class="merge-row">
+          <input type="checkbox" ${row.checked ? 'checked' : ''}
+            onchange="toggleMergeItem('priceChanged', ${i}, this.checked)" />
+          <div class="merge-row-main">
+            <span class="merge-cat-tag">${escapeHtml(row.base.category)}</span>
+            <strong>${escapeHtml(row.base.item_name)}${specTxt}</strong>
+          </div>
+          <span class="merge-price-diff">
+            $${row.base.price} → <span class="${deltaCls}">$${row.source.price} (${deltaTxt})</span>
+          </span>
+        </label>`;
+    }).join('');
+
+    sectionsHtml.push(`
+      <div class="merge-section">
+        <div class="merge-sec-head">
+          <span class="merge-sec-title t-price"><i class="fa-solid fa-tags"></i> 1. 價格變動（${diff.priceChanged.length} 項）</span>
+          <button type="button" class="text-accent-btn" onclick="toggleMergeSectionAll('priceChanged')">全選 / 取消</button>
+        </div>
+        <div class="merge-sec-hint">勾選將僅更新金額，保留基準店原本的分類與備註</div>
+        ${rows}
+      </div>`);
+  }
+
+  // 2. 新菜單新增品項
+  if (diff.added.length > 0) {
+    const rows = diff.added.map((row, i) => {
+      const it = row.source;
+      const specTxt = it.spec ? ` (${escapeHtml(it.spec)})` : '';
+      const noteTxt = it.note ? `<div class="item-meta">${escapeHtml(it.note)}</div>` : '';
+      return `
+        <label class="merge-row">
+          <input type="checkbox" ${row.checked ? 'checked' : ''}
+            onchange="toggleMergeItem('added', ${i}, this.checked)" />
+          <div class="merge-row-main">
+            <span class="merge-cat-tag">${escapeHtml(it.category)}</span>
+            <strong>${escapeHtml(it.item_name)}${specTxt}</strong>
+            ${noteTxt}
+          </div>
+          <span class="merge-price-diff">$${it.price}</span>
+        </label>`;
+    }).join('');
+
+    sectionsHtml.push(`
+      <div class="merge-section">
+        <div class="merge-sec-head">
+          <span class="merge-sec-title t-add"><i class="fa-solid fa-plus-circle"></i> 2. 新菜單新增品項（${diff.added.length} 項）</span>
+          <button type="button" class="text-accent-btn" onclick="toggleMergeSectionAll('added')">全選 / 取消</button>
+        </div>
+        <div class="merge-sec-hint">勾選將加入基準店；若為 AI 誤判雜訊請取消勾選</div>
+        ${rows}
+      </div>`);
+  }
+
+  // 3. 舊菜單有、新菜單未出現
+  if (diff.missingInSource.length > 0) {
+    const rows = diff.missingInSource.map((row, i) => {
+      const it = row.base;
+      const specTxt = it.spec ? ` (${escapeHtml(it.spec)})` : '';
+      return `
+        <label class="merge-row">
+          <input type="checkbox" ${row.checked ? 'checked' : ''}
+            onchange="toggleMergeItem('missingInSource', ${i}, this.checked)" />
+          <div class="merge-row-main">
+            <span class="merge-cat-tag">${escapeHtml(it.category)}</span>
+            <strong>${escapeHtml(it.item_name)}${specTxt}</strong>
+          </div>
+          <span class="merge-price-diff">$${it.price}</span>
+        </label>`;
+    }).join('');
+
+    sectionsHtml.push(`
+      <div class="merge-section">
+        <div class="merge-sec-head">
+          <span class="merge-sec-title t-miss"><i class="fa-solid fa-circle-minus"></i> 3. 舊有但新菜單未見（${diff.missingInSource.length} 項）</span>
+          <button type="button" class="text-danger-btn" onclick="toggleMergeSectionAll('missingInSource')">全選刪除 / 全保留</button>
+        </div>
+        <div class="merge-sec-hint">預設不勾選（安全保留）；確認已停售下架再勾選刪除</div>
+        ${rows}
+      </div>`);
+  }
+
+  // 4. 完全一致項目（預設摺疊）
+  const samePreview = diff.unchanged
+    .map(it => `${escapeHtml(it.item_name)}${it.spec ? '(' + escapeHtml(it.spec) + ')' : ''} $${it.price}`)
+    .join('、');
+
+  sectionsHtml.push(`
+    <details class="merge-section">
+      <summary class="merge-sec-title t-same" style="cursor:pointer;">
+        <i class="fa-solid fa-equals"></i> 4. 完全相同項目（${diff.unchanged.length} 項，自動保留基準店設定）
+      </summary>
+      <div class="merge-same-list">${samePreview || '無相同品項'}</div>
+    </details>`);
+
+  if (diff.priceChanged.length === 0 && diff.added.length === 0 && diff.missingInSource.length === 0) {
+    sectionsHtml.unshift(`
+      <div class="merge-guide-box" style="color:var(--success);border-color:rgba(16,185,129,0.4);">
+        <i class="fa-solid fa-circle-check"></i> 兩份菜單品項與價格完全一致！你可直接套用下方選項（例如更新原圖並刪除暫存來源店）。
+      </div>`);
+  }
+
+  document.getElementById('merge-diff-container').innerHTML = sectionsHtml.join('');
+
+  if (!preserveBottomOptions) {
+    document.getElementById('merge-opt-activate').checked = true;
+    document.getElementById('merge-opt-img-wrap').classList.toggle('hidden', !srcImgId);
+    document.getElementById('merge-opt-replace-img').checked = Boolean(srcImgId);
+    document.getElementById('merge-opt-drink-wrap').classList.toggle('hidden', !srcHasDrinkOpts);
+    document.getElementById('merge-opt-replace-drink').checked = srcHasDrinkOpts;
+    document.getElementById('merge-opt-delete-source').checked = true;
+    document.getElementById('merge-opt-delete-source-label').textContent = `合併完成後刪除來源暫存店（${source_store}）`;
+  }
+
+  updateMergeSubmitButtonText();
+}
+
+window.toggleMergeItem = function(sectionKey, idx, checked) {
+  if (!state.mergeContext || !state.mergeContext.diff[sectionKey]) return;
+  state.mergeContext.diff[sectionKey][idx].checked = Boolean(checked);
+  updateMergeSubmitButtonText();
+};
+
+window.toggleMergeSectionAll = function(sectionKey) {
+  if (!state.mergeContext || !state.mergeContext.diff[sectionKey]) return;
+  const arr = state.mergeContext.diff[sectionKey];
+  const allChecked = arr.every(r => r.checked);
+  arr.forEach(r => { r.checked = !allChecked; });
+  renderMergeDiffModal(true);
+};
+
+function updateMergeSubmitButtonText() {
+  const ctx = state.mergeContext;
+  if (!ctx) return;
+  const pCnt = ctx.diff.priceChanged.filter(r => r.checked).length;
+  const aCnt = ctx.diff.added.filter(r => r.checked).length;
+  const dCnt = ctx.diff.missingInSource.filter(r => r.checked).length;
+
+  const parts = [];
+  if (pCnt > 0) parts.push(`改價 ${pCnt}`);
+  if (aCnt > 0) parts.push(`新增 ${aCnt}`);
+  if (dCnt > 0) parts.push(`刪除 ${dCnt}`);
+
+  const detail = parts.length > 0 ? `（${parts.join(' / ')}）` : '（僅套用下方選項）';
+  document.getElementById('btn-execute-merge').innerHTML =
+    `<i class="fa-solid fa-check-double"></i> 確認執行合併${detail}`;
+}
+
+async function executeStoreMerge() {
+  const ctx = state.mergeContext;
+  if (!ctx || state.pendingActions.has('mergeStoreMenus')) return;
+
+  const priceUpdates = ctx.diff.priceChanged
+    .filter(r => r.checked)
+    .map(r => ({ menu_id: r.base.id, new_price: Number(r.source.price) || 0 }));
+
+  const addItems = ctx.diff.added
+    .filter(r => r.checked)
+    .map(r => ({
+      category: r.source.category,
+      item_name: r.source.item_name,
+      price: Number(r.source.price) || 0,
+      spec: r.source.spec || '',
+      note: r.source.note || ''
+    }));
+
+  const deleteMenuIds = ctx.diff.missingInSource
+    .filter(r => r.checked)
+    .map(r => r.base.id);
+
+  const activateBaseToday = document.getElementById('merge-opt-activate').checked;
+  const replaceImage = !document.getElementById('merge-opt-img-wrap').classList.contains('hidden') &&
+    document.getElementById('merge-opt-replace-img').checked;
+  const replaceDrinkOptions = !document.getElementById('merge-opt-drink-wrap').classList.contains('hidden') &&
+    document.getElementById('merge-opt-replace-drink').checked;
+  const deleteSourceStore = document.getElementById('merge-opt-delete-source').checked;
+
+  const summaryMsg =
+    `即將合併至基準店「${ctx.base_store}」：\n` +
+    `• 價格更新：${priceUpdates.length} 項\n` +
+    `• 新增品項：${addItems.length} 項\n` +
+    `• 刪除品項：${deleteMenuIds.length} 項` +
+    (deleteSourceStore ? `\n• 並刪除來源暫存店「${ctx.source_store}」` : '') +
+    `\n\n確定執行合併嗎？`;
+
+  const confirmed = await askConfirm(summaryMsg);
+  if (!confirmed) return;
+
+  const btn = document.getElementById('btn-execute-merge');
+  await runWithLock('mergeStoreMenus', btn, async () => {
+    try {
+      const freshData = await callGasApi('mergeStoreMenus', {
+        base_store: ctx.base_store,
+        source_store: ctx.source_store,
+        price_updates: priceUpdates,
+        add_items: addItems,
+        delete_menu_ids: deleteMenuIds,
+        activate_base_today: activateBaseToday,
+        replace_image: replaceImage,
+        replace_drink_options: replaceDrinkOptions,
+        delete_source_store: deleteSourceStore
+      });
+
+      if (activateBaseToday) {
+        state.expandedStores.add(ctx.base_store);
+      }
+      state.mergeContext = null;
+      saveCachedDashboard(freshData);
+      applyDashboardData(freshData);
+      closeModal('menu-merge-modal');
+      showToast(`已成功合併更新「${ctx.base_store}」菜單！`);
+    } catch (err) {
+      showToast(`合併失敗：${err.message}`);
+    }
+  }, '<i class="fa-solid fa-spinner fa-spin"></i> 正在合併寫入...');
+}
 
 /* ==================== 手動編輯店名、品項與金額 ==================== */
 
@@ -2550,9 +3018,10 @@ function bindEvents() {
     renderCart();
   });
 
-  // 菜單庫彈窗事件（模式切換、全選與批次刪除）
+  // 菜單庫彈窗事件（今日店家 / 比對合併 / 批次刪除）
   document.getElementById('btn-open-store-library').addEventListener('click', openStoreLibraryModal);
   document.getElementById('btn-lib-mode-active').addEventListener('click', () => setStoreLibraryMode('active'));
+  document.getElementById('btn-lib-mode-merge').addEventListener('click', () => setStoreLibraryMode('merge'));
   document.getElementById('btn-lib-mode-delete').addEventListener('click', () => setStoreLibraryMode('delete'));
   document.getElementById('store-lib-search').addEventListener('input', (e) => {
     state.storeLibSearch = e.target.value;
@@ -2573,6 +3042,11 @@ function bindEvents() {
   });
   document.getElementById('btn-apply-store-library').addEventListener('click', applyStoreLibrarySelection);
   document.getElementById('btn-batch-delete-stores').addEventListener('click', applyBatchDeleteStores);
+
+  // 比對合併事件
+  document.getElementById('btn-swap-merge-stores').addEventListener('click', swapMergeSelectors);
+  document.getElementById('btn-start-store-compare').addEventListener('click', startStoreCompare);
+  document.getElementById('btn-execute-merge').addEventListener('click', executeStoreMerge);
 
   // 批次匯入歷史紀錄彈窗事件
   document.getElementById('btn-open-import-history').addEventListener('click', openImportHistoryModal);
@@ -2602,7 +3076,7 @@ function bindEvents() {
     });
   });
 
-  // 彈窗操作與 ESC 鍵關閉
+  // 彈窗操作與 ESC 鍵關閉（優先關閉最上層燈箱）
   document.querySelectorAll('[data-close-modal]').forEach(btn => {
     btn.addEventListener('click', () => closeModal(btn.dataset.closeModal));
   });
@@ -2619,13 +3093,18 @@ function bindEvents() {
 
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape') {
+      const lightbox = document.getElementById('image-lightbox-modal');
+      if (lightbox && !lightbox.classList.contains('hidden')) {
+        closeModal('image-lightbox-modal');
+        return;
+      }
       closeModal('rating-modal');
       closeModal('menu-edit-modal');
       closeModal('store-rename-modal');
       closeModal('topping-target-modal');
       closeModal('store-library-modal');
       closeModal('import-history-modal');
-      closeModal('image-lightbox-modal');
+      closeModal('menu-merge-modal');
     }
   });
 }
