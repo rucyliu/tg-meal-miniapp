@@ -189,12 +189,47 @@ function getStoreRatingStats(storeName) {
   return { count: matched.length, avg, tags };
 }
 
+/**
+ * 萃取基礎品項名稱（去除括號備註與 +加料），讓「今日點餐」能彙整同一品項不同口味的歷史評價
+ */
+function extractBaseItemName(itemName) {
+  return String(itemName || '')
+    .replace(/[（(][^）)]*[）)]/g, '')
+    .split('+')[0]
+    .trim();
+}
+
+/**
+ * 組裝點餐紀錄項目的完整顯示名稱（保留品名、加料、規格與所有備註／口味／甜度冰量）
+ */
+function getOrderItemFullName(it) {
+  if (!it) return '';
+  const baseName = String(it.item_name || '').trim();
+  const toppings = Array.isArray(it.toppings) ? it.toppings : [];
+  const nameWithToppings = toppings.length > 0
+    ? `${baseName}+${toppings.map(t => t.item_name).join('+')}`
+    : baseName;
+
+  const detailParts = [];
+  if (it.spec && String(it.spec).trim()) detailParts.push(String(it.spec).trim());
+  if (it.note && String(it.note).trim()) detailParts.push(String(it.note).trim());
+
+  return detailParts.length > 0
+    ? `${nameWithToppings} (${detailParts.join('/')})`
+    : nameWithToppings;
+}
+
 function getItemRatingStats(storeName, itemName) {
   const targetStore = normText(storeName);
   const targetItem = normText(itemName);
-  const matched = state.reviews.filter(
-    r => normText(r.store_name) === targetStore && normText(r.item_name) === targetItem
-  );
+  const targetBase = normText(extractBaseItemName(itemName));
+
+  const matched = state.reviews.filter(r => {
+    if (normText(r.store_name) !== targetStore) return false;
+    const revNorm = normText(r.item_name);
+    const revBase = normText(extractBaseItemName(r.item_name));
+    return revNorm === targetItem || (targetBase && revBase === targetBase);
+  });
   if (matched.length === 0) return { count: 0, avg: null, tags: [], latestComment: '' };
 
   const sum = matched.reduce((acc, r) => acc + Number(r.rating || 0), 0);
@@ -203,31 +238,45 @@ function getItemRatingStats(storeName, itemName) {
   return { count: matched.length, avg, tags, latestComment: matched[0].comment || '' };
 }
 
+function findReviewForOrderItem(orderId, it) {
+  const targetStore = normText(it.store_name);
+  const fullNorm = normText(getOrderItemFullName(it));
+  const baseNorm = normText(it.item_name);
+
+  // 先精準比對含備註的完整名稱，再向下相容先前僅存原始品名的舊評價
+  return (
+    state.reviews.find(
+      r => String(r.order_id) === String(orderId) &&
+           normText(r.store_name) === targetStore &&
+           normText(r.item_name) === fullNorm
+    ) ||
+    state.reviews.find(
+      r => String(r.order_id) === String(orderId) &&
+           normText(r.store_name) === targetStore &&
+           normText(r.item_name) === baseNorm
+    )
+  );
+}
+
 function getItemOrderCount(storeName, itemName) {
   const targetStore = normText(storeName);
   const targetItem = normText(itemName);
+  const targetBase = normText(extractBaseItemName(itemName));
   let count = 0;
 
   state.orders.forEach(ord => {
     const items = Array.isArray(ord.items) ? ord.items : [];
     items.forEach(it => {
-      if (it && normText(it.store_name) === targetStore && normText(it.item_name) === targetItem) {
+      if (!it || normText(it.store_name) !== targetStore) return;
+      const itNorm = normText(it.item_name);
+      const itBase = normText(extractBaseItemName(it.item_name));
+      if (itNorm === targetItem || (targetBase && itBase === targetBase)) {
         count++;
       }
     });
   });
 
   return count;
-}
-
-function findReviewForOrderItem(orderId, storeName, itemName) {
-  const targetStore = normText(storeName);
-  const targetItem = normText(itemName);
-  return state.reviews.find(
-    r => String(r.order_id) === String(orderId) &&
-         normText(r.store_name) === targetStore &&
-         normText(r.item_name) === targetItem
-  );
 }
 
 function getRatingColorClass(avg) {
@@ -664,6 +713,7 @@ function createCartEntry(menuItem) {
     store_name: menuItem.store_name,
     category: menuItem.category,
     item_name: menuItem.item_name,
+    menu_note: menuItem.note || '', // 保留原菜單備註（例如可選口味說明）
     base_price: Number(menuItem.price) || 0,
     extra_price: 0,
     spec: menuItem.spec || '',
@@ -1073,6 +1123,10 @@ function renderCart() {
       optionsHtml += `<div class="opt-row"><span class="opt-label">店註</span>${snPills}</div>`;
     }
 
+    const menuNoteHtml = entry.menu_note
+      ? `<div class="cart-menu-note"><i class="fa-solid fa-circle-info"></i> 菜單備註：${escapeHtml(entry.menu_note)}</div>`
+      : '';
+
     const hasNote = Boolean(entry.custom_note);
     const hasExtra = Number(entry.extra_price) > 0;
 
@@ -1088,6 +1142,7 @@ function renderCart() {
             <i class="fa-solid fa-trash-can"></i>
           </button>
         </div>
+        ${menuNoteHtml}
         ${optionsHtml}
         <div class="cart-note-row">
           <div class="cart-input-wrap">
@@ -1212,7 +1267,7 @@ function renderHistory() {
   container.innerHTML = state.orders.map((ord, oIdx) => {
     const items = Array.isArray(ord.items) ? ord.items : [];
     const itemsHtml = items.map((it, iIdx) => {
-      const existingRev = findReviewForOrderItem(ord.order_id, it.store_name, it.item_name);
+      const existingRev = findReviewForOrderItem(ord.order_id, it);
       const rateBtnHtml = existingRev
         ? `<button class="btn btn-sm rating-good" onclick="openItemRatingModal(${oIdx}, ${iIdx})">
              <i class="fa-solid fa-star"></i> 已評 ${existingRev.rating}★
@@ -1225,11 +1280,18 @@ function renderHistory() {
         ? `<span class="topping-badge">+${escapeHtml(it.toppings.map(t => t.item_name).join('+'))}</span>`
         : '';
 
+      const detailParts = [];
+      if (it.spec && String(it.spec).trim()) detailParts.push(String(it.spec).trim());
+      if (it.note && String(it.note).trim()) detailParts.push(String(it.note).trim());
+      const detailBadge = detailParts.length > 0
+        ? `<span class="history-note-badge">(${escapeHtml(detailParts.join('/'))})</span>`
+        : '';
+
       return `
         <div class="history-item-row">
           <div style="min-width:0;">
             <span class="cart-store-tag">${escapeHtml(it.store_name || '未標示')}</span>
-            <strong>${escapeHtml(it.item_name || '')}</strong>${toppingSuffix}
+            <strong>${escapeHtml(it.item_name || '')}</strong>${toppingSuffix}${detailBadge}
             <span class="item-meta"> $${it.price || 0}</span>
           </div>
           ${rateBtnHtml}
@@ -1487,7 +1549,6 @@ function openImportHistoryModal() {
  * 解析各種日常群組點餐文字格式（支援空行分段、Telegram 日期標頭、共$150 / 共150$、單行與無價品項）
  */
 function parseHistoryTextBlocks(rawText) {
-  // 若使用者直接複製多則 Telegram 訊息未留空行，自動於 [YYYY/MM/DD ...] 標頭前插入空行分段
   const normalized = String(rawText || '')
     .replace(/\r\n/g, '\n')
     .replace(/(?<!\n\n)\n(?=\[\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2})/g, '\n\n')
@@ -1507,7 +1568,7 @@ function parseHistoryTextBlocks(rawText) {
     const keptTextLines = [];
 
     lines.forEach(line => {
-      // 1. 偵測日期列（支援 [2026/11/20 ...] 或 2026-11-20 或 11/20）
+      // 1. 偵測日期列
       const fullDateMatch = line.match(/^\[?(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
       if (fullDateMatch && (line.startsWith('[') || /^\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2}$/.test(line))) {
         orderDate = `${fullDateMatch[1]}-${fullDateMatch[2].padStart(2, '0')}-${fullDateMatch[3].padStart(2, '0')}`;
@@ -1521,22 +1582,24 @@ function parseHistoryTextBlocks(rawText) {
 
       keptTextLines.push(line);
 
-      // 2. 偵測總計列（支援 共 $150 謝謝 / 共150$ 謝謝 / 共$140）
+      // 2. 偵測總計列
       const totalMatch = line.match(/^共\s*\$?\s*(\d+)\s*\$?/);
       if (totalMatch) {
         explicitTotal = Number(totalMatch[1]);
         return;
       }
 
-      // 3. 解析單一品項列
+      // 3. 解析單一品項列（支援金額在行尾，或金額後面還接括號備註）
       let clean = line.replace(/\s*(謝謝|感謝)[!！~。.\s]*$/g, '').trim();
       if (!clean) return;
 
       let price = 0;
-      const priceMatch = clean.match(/(?:\$\s*(\d+)|(\d+)\s*\$)\s*$/);
+      const priceMatch = clean.match(/(?:\$\s*(\d+)|(\d+)\s*\$)(?=\s*(?:[（(][^）)]*[）)])?\s*$)/);
       if (priceMatch) {
         price = Number(priceMatch[1] || priceMatch[2]) || 0;
-        clean = clean.slice(0, priceMatch.index).trim();
+        clean = (clean.slice(0, priceMatch.index) + ' ' + clean.slice(priceMatch.index + priceMatch[0].length))
+          .replace(/\s+/g, ' ')
+          .trim();
       }
 
       let storeName = '未標示店家';
@@ -1547,15 +1610,17 @@ function parseHistoryTextBlocks(rawText) {
         rawItem = clean.slice(dashIdx + 1).trim();
       }
 
-      // 萃取小括號備註並清理品項名稱（方便與菜單及評價比對）
-      const notes = [];
-      const itemName = rawItem
-        .replace(/[（(]([^）)]+)[）)]/g, (_, inner) => {
-          notes.push(inner.trim());
-          return ' ';
-        })
-        .replace(/\s+/g, ' ')
-        .trim();
+      // 只將「最尾端」的小括號拆入 note（如飲料甜度冰量），中間括號原樣留在品名中避免位移
+      const trailingNotes = [];
+      let itemName = rawItem;
+      while (true) {
+        const tailMatch = itemName.match(/\s*[（(]([^）)]+)[）)]\s*$/);
+        if (!tailMatch) break;
+        const candidateName = itemName.slice(0, tailMatch.index).trim();
+        if (!candidateName) break;
+        trailingNotes.unshift(tailMatch[1].trim());
+        itemName = candidateName;
+      }
 
       if (itemName) {
         items.push({
@@ -1565,7 +1630,7 @@ function parseHistoryTextBlocks(rawText) {
           toppings: [],
           spec: '',
           price: price,
-          note: notes.join('/')
+          note: trailingNotes.join('/')
         });
       }
     });
@@ -1643,17 +1708,18 @@ window.openItemRatingModal = function(oIdx, iIdx) {
   const ord = state.orders[oIdx];
   if (!ord || !ord.items || !ord.items[iIdx]) return;
   const item = ord.items[iIdx];
+  const fullItemName = getOrderItemFullName(item);
 
   state.activeReviewTarget = {
     order_id: ord.order_id,
     store_name: item.store_name || '未標示店家',
-    item_name: item.item_name || ''
+    item_name: fullItemName
   };
   state.selectedRating = 5;
 
   document.getElementById('modal-review-target').innerHTML = `
     <span class="cart-store-tag">${escapeHtml(state.activeReviewTarget.store_name)}</span>
-    <strong>${escapeHtml(state.activeReviewTarget.item_name)}</strong>
+    <strong>${escapeHtml(fullItemName)}</strong>
     <span class="item-meta">（${escapeHtml(ord.date)}）</span>`;
   document.getElementById('review-comment').value = '';
   document.querySelectorAll('#quick-tags .tag-chip').forEach(el => el.classList.remove('selected'));
