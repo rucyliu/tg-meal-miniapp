@@ -586,9 +586,10 @@ input[type="number"]#budget-input {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
   padding: 7px 2px;
   border-bottom: 1px dashed rgba(41, 53, 72, 0.7);
-  gap: 8px;
+  gap: 6px 8px;
 }
 
 .menu-row:last-child {
@@ -596,7 +597,7 @@ input[type="number"]#budget-input {
 }
 
 .menu-item-info {
-  flex: 1;
+  flex: 1 1 100px;
   min-width: 0;
 }
 
@@ -1602,17 +1603,13 @@ input[type="number"]#budget-input {
   margin: 6px 0 16px;
 }
 
-/* 同名多規格品項合併顯示 */
-.menu-row-grouped {
-  flex-direction: column;
-  align-items: stretch;
-  gap: 6px;
-}
-
+/* 統一品項複合按鈕（單列靠右對齊，多規格自動靠右換行） */
 .variant-chips-wrap {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  justify-content: flex-end;
+  gap: 5px;
+  margin-left: auto;
 }
 
 .variant-chip-group {
@@ -1628,13 +1625,14 @@ input[type="number"]#budget-input {
   background: transparent;
   border: none;
   color: var(--text-main);
-  padding: 5px 8px;
+  padding: 4px 7px;
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
+  white-space: nowrap;
 }
 
 .variant-add-btn:active {
@@ -1660,7 +1658,7 @@ input[type="number"]#budget-input {
   border: none;
   border-left: 1px solid var(--border-color);
   color: var(--text-muted);
-  padding: 0 7px;
+  padding: 0 6px;
   font-size: 11px;
   cursor: pointer;
   display: inline-flex;
