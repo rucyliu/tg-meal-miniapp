@@ -6,7 +6,7 @@
   <title>每日點餐助手</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
-  <link rel="stylesheet" href="style.css?v=11" />
+  <link rel="stylesheet" href="style.css?v=12" />
 </head>
 <body>
   <div class="app-container">
@@ -337,7 +337,7 @@
     </div>
   </div>
 
-  <!-- 彈窗 5：菜單庫（依名稱排序 ＋ 切換今日店家 / 複選批次刪除） -->
+  <!-- 彈窗 5：菜單庫管理（切換今日店家 / 比對合併 / 複選批次刪除） -->
   <div id="store-library-modal" class="modal-backdrop hidden">
     <div class="modal-card">
       <div class="modal-header">
@@ -347,34 +347,70 @@
       <div class="modal-body">
         <div class="lib-mode-switch">
           <button type="button" id="btn-lib-mode-active" class="lib-mode-btn active">
-            <i class="fa-solid fa-calendar-check"></i> 切換今日店家
+            <i class="fa-solid fa-calendar-check"></i> 今日店家
+          </button>
+          <button type="button" id="btn-lib-mode-merge" class="lib-mode-btn">
+            <i class="fa-solid fa-code-compare"></i> 比對合併
           </button>
           <button type="button" id="btn-lib-mode-delete" class="lib-mode-btn">
             <i class="fa-solid fa-trash-can"></i> 批次刪除
           </button>
         </div>
 
-        <div class="search-box">
-          <i class="fa-solid fa-magnifying-glass"></i>
-          <input type="text" id="store-lib-search" placeholder="依名稱搜尋（已按名稱排序，方便找重複）..." />
-        </div>
-
-        <div class="store-lib-summary">
-          <span id="store-lib-selected-hint">已勾選 0 家</span>
-          <div class="store-lib-quick-actions">
-            <button type="button" id="btn-store-lib-select-all" class="text-accent-btn hidden">全選</button>
-            <button type="button" id="btn-uncheck-all-stores" class="text-danger-btn">全部取消</button>
+        <!-- 列表模式（今日店家 / 批次刪除共用） -->
+        <div id="store-lib-list-panel">
+          <div class="search-box">
+            <i class="fa-solid fa-magnifying-glass"></i>
+            <input type="text" id="store-lib-search" placeholder="依名稱搜尋（已按名稱排序，方便找重複）..." />
           </div>
+
+          <div class="store-lib-summary">
+            <span id="store-lib-selected-hint">已勾選 0 家</span>
+            <div class="store-lib-quick-actions">
+              <button type="button" id="btn-store-lib-select-all" class="text-accent-btn hidden">全選</button>
+              <button type="button" id="btn-uncheck-all-stores" class="text-danger-btn">全部取消</button>
+            </div>
+          </div>
+
+          <div id="store-library-list" class="store-lib-list"></div>
+
+          <button id="btn-apply-store-library" class="btn btn-primary btn-block" style="margin-top:12px;">
+            <i class="fa-solid fa-check"></i> 套用為今日菜單
+          </button>
+          <button id="btn-batch-delete-stores" class="btn btn-danger btn-block hidden" style="margin-top:12px;" disabled>
+            <i class="fa-solid fa-trash-can"></i> 永久刪除已選 (0 家)
+          </button>
         </div>
 
-        <div id="store-library-list" class="store-lib-list"></div>
+        <!-- 比對合併配對面板 -->
+        <div id="store-lib-merge-panel" class="hidden">
+          <div id="merge-suggestions" class="merge-suggestions hidden"></div>
 
-        <button id="btn-apply-store-library" class="btn btn-primary btn-block" style="margin-top:12px;">
-          <i class="fa-solid fa-check"></i> 套用為今日菜單
-        </button>
-        <button id="btn-batch-delete-stores" class="btn btn-danger btn-block hidden" style="margin-top:12px;" disabled>
-          <i class="fa-solid fa-trash-can"></i> 永久刪除已選 (0 家)
-        </button>
+          <div class="form-group">
+            <label for="merge-base-select"><i class="fa-solid fa-shield-halved"></i> 基準店（保留已手動整理好的舊菜單）</label>
+            <select id="merge-base-select"></select>
+          </div>
+
+          <div class="merge-swap-row">
+            <button type="button" id="btn-swap-merge-stores" class="btn btn-ghost btn-sm" title="互換基準店與來源店">
+              <i class="fa-solid fa-up-down"></i> 互換基準與來源
+            </button>
+          </div>
+
+          <div class="form-group">
+            <label for="merge-source-select"><i class="fa-solid fa-file-circle-plus"></i> 新菜單來源（剛解析出的新版／暫存菜單）</label>
+            <select id="merge-source-select"></select>
+          </div>
+
+          <div class="merge-guide-box">
+            <i class="fa-solid fa-circle-info"></i>
+            比對會以「品名＋規格」配對，自動保留基準店已整理好的分類與備註，僅列出價格變動、新增與未見項目供你勾選。
+          </div>
+
+          <button type="button" id="btn-start-store-compare" class="btn btn-primary btn-block" style="margin-top:12px;">
+            <i class="fa-solid fa-code-compare"></i> 開始比對差異
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -433,10 +469,48 @@
     </div>
   </div>
 
+  <!-- 彈窗 8：菜單差異比對與合併視窗 -->
+  <div id="menu-merge-modal" class="modal-backdrop hidden">
+    <div class="modal-card merge-modal-card">
+      <div class="modal-header">
+        <h3><i class="fa-solid fa-code-compare"></i> 菜單差異比對</h3>
+        <button class="icon-btn" data-close-modal="menu-merge-modal"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="modal-body">
+        <div id="merge-banner" class="merge-banner"></div>
+        <div id="merge-summary-pills" class="merge-summary-pills"></div>
+        <div id="merge-diff-container" class="merge-diff-container"></div>
+
+        <div class="merge-options-box">
+          <label class="merge-opt-check">
+            <input type="checkbox" id="merge-opt-activate" checked />
+            <span>將基準店設為今日啟用菜單</span>
+          </label>
+          <label class="merge-opt-check" id="merge-opt-img-wrap">
+            <input type="checkbox" id="merge-opt-replace-img" checked />
+            <span>以新菜單原圖取代舊原圖（舊圖移至垃圾桶）</span>
+          </label>
+          <label class="merge-opt-check" id="merge-opt-drink-wrap">
+            <input type="checkbox" id="merge-opt-replace-drink" checked />
+            <span>同步更新飲料甜度／冰量選項</span>
+          </label>
+          <label class="merge-opt-check">
+            <input type="checkbox" id="merge-opt-delete-source" checked />
+            <span id="merge-opt-delete-source-label">合併完成後刪除來源暫存店</span>
+          </label>
+        </div>
+
+        <button type="button" id="btn-execute-merge" class="btn btn-success btn-block" style="margin-top:10px;">
+          <i class="fa-solid fa-check-double"></i> 確認執行合併
+        </button>
+      </div>
+    </div>
+  </div>
+  
   <!-- Toast 提示 -->
   <div id="toast" class="toast hidden"></div>
 
-  <script src="api.js?v=11"></script>
-  <script src="app.js?v=11"></script>
+  <script src="api.js?v=12"></script>
+  <script src="app.js?v=12"></script>
 </body>
 </html>
