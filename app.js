@@ -310,27 +310,52 @@ function renderHeader() {
   }
 }
 
-function sortMenuItems(items) {
-  const arr = [...items];
+/**
+ * 將同分類中「相同品項名稱」的項目合併為同一組，組內規格依價格由低到高排列，
+ * 並依據目前的排序條件對品項組進行排序
+ */
+function groupAndSortMenuItems(items) {
+  const groupMap = new Map();
+
+  items.forEach(it => {
+    const key = normText(it.item_name);
+    if (!groupMap.has(key)) {
+      groupMap.set(key, {
+        store_name: it.store_name,
+        category: it.category,
+        item_name: it.item_name,
+        variants: []
+      });
+    }
+    groupMap.get(key).variants.push(it);
+  });
+
+  const groups = Array.from(groupMap.values()).map(g => {
+    g.variants.sort((a, b) => (Number(a.price) || 0) - (Number(b.price) || 0));
+    return g;
+  });
+
   switch (state.menuSortBy) {
     case 'price_asc':
-      return arr.sort((a, b) => (a.price || 0) - (b.price || 0));
+      return groups.sort((a, b) => (a.variants[0].price || 0) - (b.variants[0].price || 0));
     case 'price_desc':
-      return arr.sort((a, b) => (b.price || 0) - (a.price || 0));
+      return groups.sort(
+        (a, b) => (b.variants[b.variants.length - 1].price || 0) - (a.variants[a.variants.length - 1].price || 0)
+      );
     case 'rating_desc':
-      return arr.sort((a, b) => {
+      return groups.sort((a, b) => {
         const ra = getItemRatingStats(a.store_name, a.item_name).avg ?? -1;
         const rb = getItemRatingStats(b.store_name, b.item_name).avg ?? -1;
         return rb - ra;
       });
     case 'count_desc':
-      return arr.sort((a, b) => {
+      return groups.sort((a, b) => {
         const ca = getItemOrderCount(a.store_name, a.item_name);
         const cb = getItemOrderCount(b.store_name, b.item_name);
         return cb - ca;
       });
     default:
-      return arr;
+      return groups;
   }
 }
 
@@ -461,24 +486,27 @@ function renderMenus() {
       catsHtml = catOrder
         .filter(cat => catGroups[cat] && catGroups[cat].length > 0)
         .map(cat => {
-          const sortedCatItems = sortMenuItems(catGroups[cat]);
-          const rowsHtml = sortedCatItems.map(it => {
-            const specText = it.spec ? ` (${escapeHtml(it.spec)})` : '';
-            const noteText = it.note ? `<div class="item-meta">${escapeHtml(it.note)}</div>` : '';
+          const groupedItems = groupAndSortMenuItems(catGroups[cat]);
+          const addBtnTitle = cat === '加料' ? '加料至已選飲料' : '加入點餐';
+          const pricePrefix = cat === '加料' ? '+$' : '$';
 
-            const itemStats = getItemRatingStats(it.store_name, it.item_name);
+          const rowsHtml = groupedItems.map(group => {
+            const firstItem = group.variants[0];
+
+            // 同名品項共用一次歷史評價與點過次數徽章
+            const itemStats = getItemRatingStats(group.store_name, group.item_name);
             let itemReviewPill = '';
             if (itemStats.avg !== null) {
               const cls = getRatingColorClass(itemStats.avg);
               const icon = itemStats.avg < 3 ? 'fa-triangle-exclamation' : 'fa-star';
               const tagStr = itemStats.tags.length > 0 ? ` ${escapeHtml(itemStats.tags[0])}` : '';
               itemReviewPill = `
-                <span class="item-rating-pill ${cls}" onclick="jumpToReviewSearch('${escapeHtml(it.id)}')" title="查看此品項歷史評價">
+                <span class="item-rating-pill ${cls}" onclick="jumpToReviewSearch('${escapeHtml(firstItem.id)}')" title="查看此品項歷史評價">
                   <i class="fa-solid ${icon}"></i> ${itemStats.avg}${tagStr}
                 </span>`;
             }
 
-            const orderCount = getItemOrderCount(it.store_name, it.item_name);
+            const orderCount = getItemOrderCount(group.store_name, group.item_name);
             const countPill = orderCount > 0
               ? `<span class="item-count-pill" title="歷史點過次數"><i class="fa-solid fa-bag-shopping"></i> 點過 ${orderCount} 次</span>`
               : '';
@@ -487,24 +515,69 @@ function renderMenus() {
               ? `<div class="item-meta-pills">${itemReviewPill}${countPill}</div>`
               : '';
 
-            const addBtnTitle = cat === '加料' ? '加料至已選飲料' : '加入點餐';
-            const pricePrefix = cat === '加料' ? '+$' : '$';
+            // 單一規格：維持原本簡潔的單行排版
+            if (group.variants.length === 1) {
+              const it = firstItem;
+              const specText = it.spec ? ` (${escapeHtml(it.spec)})` : '';
+              const noteText = it.note ? `<div class="item-meta">${escapeHtml(it.note)}</div>` : '';
 
-            return `
-              <div class="menu-row">
-                <div class="menu-item-info">
-                  <div><strong>${escapeHtml(it.item_name)}${specText}</strong></div>
-                  ${pillsRow}
-                  ${noteText}
-                </div>
-                <div class="item-actions">
-                  <span class="item-price">${pricePrefix}${it.price}</span>
-                  <button class="icon-btn-sm" onclick="openEditMenuModalById('${escapeHtml(it.id)}')" title="編輯品項或金額">
+              return `
+                <div class="menu-row">
+                  <div class="menu-item-info">
+                    <div><strong>${escapeHtml(it.item_name)}${specText}</strong></div>
+                    ${pillsRow}
+                    ${noteText}
+                  </div>
+                  <div class="item-actions">
+                    <span class="item-price">${pricePrefix}${it.price}</span>
+                    <button class="icon-btn-sm" onclick="openEditMenuModalById('${escapeHtml(it.id)}')" title="編輯品項或金額">
+                      <i class="fa-solid fa-pen"></i>
+                    </button>
+                    <button class="qty-btn" onclick="addToCart('${escapeHtml(it.id)}')" title="${addBtnTitle}">
+                      <i class="fa-solid fa-plus"></i>
+                    </button>
+                  </div>
+                </div>`;
+            }
+
+            // 多規格同名品項：合併為一列，下方並列各規格加入／編輯按鈕
+            const uniqueNotes = [...new Set(group.variants.map(v => String(v.note || '').trim()).filter(Boolean))];
+            let notesHtml = '';
+            if (uniqueNotes.length === 1) {
+              notesHtml = `<div class="item-meta">${escapeHtml(uniqueNotes[0])}</div>`;
+            } else if (uniqueNotes.length > 1) {
+              notesHtml = group.variants
+                .filter(v => String(v.note || '').trim())
+                .map(v => {
+                  const prefix = v.spec ? `[${escapeHtml(v.spec)}] ` : '';
+                  return `<div class="item-meta">${prefix}${escapeHtml(v.note)}</div>`;
+                })
+                .join('');
+            }
+
+            const variantChipsHtml = group.variants.map(v => {
+              const specHtml = v.spec ? `<span class="variant-spec">${escapeHtml(v.spec)}</span>` : '';
+              return `
+                <div class="variant-chip-group">
+                  <button type="button" class="variant-add-btn" onclick="addToCart('${escapeHtml(v.id)}')" title="${addBtnTitle}">
+                    ${specHtml}<span class="variant-price">${pricePrefix}${v.price}</span>
+                    <i class="fa-solid fa-plus variant-add-icon"></i>
+                  </button>
+                  <button type="button" class="variant-edit-btn" onclick="openEditMenuModalById('${escapeHtml(v.id)}')" title="編輯此規格">
                     <i class="fa-solid fa-pen"></i>
                   </button>
-                  <button class="qty-btn" onclick="addToCart('${escapeHtml(it.id)}')" title="${addBtnTitle}">
-                    <i class="fa-solid fa-plus"></i>
-                  </button>
+                </div>`;
+            }).join('');
+
+            return `
+              <div class="menu-row menu-row-grouped">
+                <div class="menu-item-info">
+                  <div><strong>${escapeHtml(group.item_name)}</strong></div>
+                  ${pillsRow}
+                  ${notesHtml}
+                </div>
+                <div class="variant-chips-wrap">
+                  ${variantChipsHtml}
                 </div>
               </div>`;
           }).join('');
