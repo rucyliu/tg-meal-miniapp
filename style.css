@@ -1601,3 +1601,73 @@ input[type="number"]#budget-input {
   text-align: center;
   margin: 6px 0 16px;
 }
+
+/* 同名多規格品項合併顯示 */
+.menu-row-grouped {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.variant-chips-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.variant-chip-group {
+  display: inline-flex;
+  align-items: stretch;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-color);
+  border-radius: 7px;
+  overflow: hidden;
+}
+
+.variant-add-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-main);
+  padding: 5px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.variant-add-btn:active {
+  background: rgba(56, 189, 248, 0.16);
+}
+
+.variant-spec {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.variant-price {
+  color: var(--text-main);
+}
+
+.variant-add-icon {
+  color: var(--accent);
+  font-size: 11px;
+}
+
+.variant-edit-btn {
+  background: rgba(11, 17, 32, 0.35);
+  border: none;
+  border-left: 1px solid var(--border-color);
+  color: var(--text-muted);
+  padding: 0 7px;
+  font-size: 11px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.variant-edit-btn:hover {
+  color: var(--text-main);
+}
