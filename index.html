@@ -6,7 +6,7 @@
   <title>每日點餐助手</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
-  <link rel="stylesheet" href="style.css?v=3" />
+  <link rel="stylesheet" href="style.css?v=4" />
 </head>
 <body>
   <div class="app-container">
@@ -109,8 +109,17 @@
       </section>
     </main>
 
-    <!-- 分頁 2：點餐紀錄 -->
+    <!-- 分頁 2：點餐紀錄（本週餐費請領統計 ＋ 批次匯入 ＋ 逐品項評價） -->
     <main id="tab-history" class="tab-content">
+      <section id="weekly-allowance-card" class="card allowance-card"></section>
+
+      <div class="toolbar-row">
+        <span id="history-count-hint" class="section-hint">點餐紀錄</span>
+        <button id="btn-open-import-history" class="btn btn-outline-sm">
+          <i class="fa-solid fa-file-import"></i> 批次匯入紀錄
+        </button>
+      </div>
+
       <div id="history-container" class="history-container">
         <div class="empty-state"><p>尚無點餐紀錄</p></div>
       </div>
@@ -335,10 +344,33 @@
     </div>
   </div>
 
+  <!-- 彈窗 6：批次匯入歷史點餐紀錄 -->
+  <div id="import-history-modal" class="modal-backdrop hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3><i class="fa-solid fa-file-import"></i> 批次匯入歷史點餐紀錄</h3>
+        <button class="icon-btn" data-close-modal="import-history-modal"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="import-raw-text">貼上點餐文字（不同筆紀錄請以「空行」分隔；可於首行加日期如 2026-11-20）</label>
+          <textarea id="import-raw-text" rows="7" placeholder="範例：&#10;滿大方 - 酥炸排骨便當 $95&#10;新井茶 - 巧克力奶茶(無糖/熱飲) $55&#10;共 $150 謝謝&#10;&#10;雞客嚕嚕 - 鹽烤鯖魚 便當 $140 謝謝"></textarea>
+        </div>
+        <button type="button" id="btn-parse-import" class="btn btn-ghost btn-block" style="margin-bottom:10px;">
+          <i class="fa-solid fa-magnifying-glass-chart"></i> 解析並預覽結果
+        </button>
+        <div id="import-preview-list" class="import-preview-list hidden"></div>
+        <button type="button" id="btn-confirm-import" class="btn btn-primary btn-block hidden" style="margin-top:10px;">
+          <i class="fa-solid fa-cloud-arrow-up"></i> 確認匯入紀錄
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- Toast 提示 -->
   <div id="toast" class="toast hidden"></div>
 
-  <script src="api.js?v=3"></script>
-  <script src="app.js?v=3"></script>
+  <script src="api.js?v=4"></script>
+  <script src="app.js?v=4"></script>
 </body>
 </html>
