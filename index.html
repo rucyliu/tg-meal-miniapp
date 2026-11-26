@@ -6,7 +6,7 @@
   <title>每日點餐助手</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
-  <link rel="stylesheet" href="style.css?v=7" />
+  <link rel="stylesheet" href="style.css?v=9" />
 </head>
 <body>
   <div class="app-container">
@@ -76,6 +76,15 @@
         </div>
       </div>
 
+      <!-- 今日菜單關鍵字搜尋 -->
+      <div class="search-box menu-search-box">
+        <i class="fa-solid fa-magnifying-glass"></i>
+        <input type="text" id="menu-search-input" placeholder="搜尋今日餐點、飲料或店名..." />
+        <button type="button" id="btn-clear-menu-search" class="icon-btn-plain hidden" title="清除搜尋">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
       <!-- 菜單價格篩選、排序與一鍵收合列 -->
       <section id="menu-filter-bar" class="card menu-filter-bar">
         <div class="menu-filter-group">
@@ -113,6 +122,14 @@
     <main id="tab-history" class="tab-content">
       <section id="weekly-allowance-card" class="card allowance-card"></section>
 
+      <div class="search-box" style="margin-bottom:8px;">
+        <i class="fa-solid fa-magnifying-glass"></i>
+        <input type="text" id="history-search-input" placeholder="搜尋歷史訂餐（店名、品項、口味或日期）..." />
+        <button type="button" id="btn-clear-history-search" class="icon-btn-plain hidden" title="清除搜尋">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+      
       <div class="toolbar-row">
         <span id="history-count-hint" class="section-hint">點餐紀錄</span>
         <button id="btn-open-import-history" class="btn btn-outline-sm">
@@ -385,10 +402,41 @@
     </div>
   </div>
 
+  <!-- 彈窗 7：菜單原圖檢視燈箱（支援縮放與拖曳捲動） -->
+  <div id="image-lightbox-modal" class="modal-backdrop hidden">
+    <div class="lightbox-card">
+      <div class="lightbox-header">
+        <span id="lightbox-title" class="lightbox-title"><i class="fa-regular fa-image"></i> 菜單原圖</span>
+        <div class="lightbox-controls">
+          <button type="button" id="lightbox-zoom-out" class="icon-btn-sm" title="縮小">
+            <i class="fa-solid fa-magnifying-glass-minus"></i>
+          </button>
+          <button type="button" id="lightbox-zoom-reset" class="btn btn-ghost btn-sm" title="還原 100%">100%</button>
+          <button type="button" id="lightbox-zoom-in" class="icon-btn-sm" title="放大">
+            <i class="fa-solid fa-magnifying-glass-plus"></i>
+          </button>
+          <a id="lightbox-open-drive" href="#" target="_blank" rel="noopener" class="icon-btn-sm" title="另開原檔">
+            <i class="fa-solid fa-arrow-up-right-from-square"></i>
+          </a>
+          <button type="button" class="icon-btn-sm" data-close-modal="image-lightbox-modal" title="關閉">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </div>
+      </div>
+      <div id="lightbox-viewport" class="lightbox-viewport">
+        <div id="lightbox-loading" class="lightbox-loading">
+          <i class="fa-solid fa-spinner fa-spin"></i> 正在載入菜單原圖...
+        </div>
+        <img id="lightbox-img" class="lightbox-img hidden" alt="菜單原圖" />
+      </div>
+      <div class="lightbox-hint">雙擊圖片可快速切換放大／還原，放大後可上下左右滑動檢視細節</div>
+    </div>
+  </div>
+
   <!-- Toast 提示 -->
   <div id="toast" class="toast hidden"></div>
 
-  <script src="api.js?v=7"></script>
-  <script src="app.js?v=7"></script>
+  <script src="api.js?v=9"></script>
+  <script src="app.js?v=9"></script>
 </body>
 </html>
