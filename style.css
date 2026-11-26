@@ -1486,3 +1486,118 @@ input[type="number"]#budget-input {
   color: var(--text-muted);
   margin-left: 4px;
 }
+
+/* 今日點餐關鍵字搜尋框 */
+.menu-search-box {
+  background: var(--bg-card);
+  margin-bottom: 8px;
+}
+
+/* 店家標題旁的原圖按鈕與菜單甜度冰量標籤 */
+.btn-orig-img {
+  background: rgba(56, 189, 248, 0.14);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.opt-source-tag {
+  font-size: 10px;
+  color: var(--success);
+  margin-left: 2px;
+}
+
+/* 菜單原圖檢視燈箱 */
+.lightbox-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  width: 96vw;
+  max-width: 660px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  padding: 12px;
+  gap: 8px;
+}
+
+.lightbox-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.lightbox-title {
+  font-weight: 700;
+  color: var(--accent);
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 220px;
+}
+
+.lightbox-controls {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.lightbox-controls a {
+  text-decoration: none;
+}
+
+.lightbox-viewport {
+  flex: 1;
+  min-height: 240px;
+  max-height: 70vh;
+  overflow: auto;
+  background: #020617;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  position: relative;
+  -webkit-overflow-scrolling: touch;
+}
+
+.lightbox-loading {
+  padding: 60px 16px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.lightbox-img {
+  display: block;
+  margin: 0 auto;
+  max-width: 100%;
+  height: auto;
+  cursor: zoom-in;
+  transition: width 0.15s ease;
+}
+
+.lightbox-img.is-zoomed {
+  max-width: none;
+  cursor: zoom-out;
+}
+
+.lightbox-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+/* 點餐紀錄分頁載入更多按鈕 */
+.load-more-wrap {
+  text-align: center;
+  margin: 6px 0 16px;
+}
