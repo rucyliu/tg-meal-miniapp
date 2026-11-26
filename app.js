@@ -23,7 +23,7 @@ const state = {
   expandedStores: new Set(),
   hasInitializedExpand: false,
   menuSearch: '',
-  menuMaxPrice: null,
+  menuMaxPrice: 150,
   menuSortBy: 'default',
   historySearch: '',
   historyVisibleCount: 20,
@@ -2894,6 +2894,10 @@ function bindEvents() {
   // 菜單價格篩選、排序與一鍵全部展開/收合
   const priceFilterInput = document.getElementById('menu-max-price');
   const clearPriceBtn = document.getElementById('btn-clear-price-filter');
+  if (state.menuMaxPrice !== null) {
+    priceFilterInput.value = state.menuMaxPrice;
+    clearPriceBtn.classList.remove('hidden');
+  }
   priceFilterInput.addEventListener('input', () => {
     const val = Number(priceFilterInput.value);
     state.menuMaxPrice = val > 0 ? val : null;
