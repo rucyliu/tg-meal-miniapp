@@ -27,7 +27,9 @@ const state = {
   appendThanks: true,
   draftSelectedStores: new Set(),
   storeLibSearch: '',
-  pendingActions: new Set()
+  pendingActions: new Set(),
+  dailyStatuses: {},
+  parsedImportOrders: []
 };
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -111,7 +113,8 @@ function persistCurrentStateToCache() {
     menus: state.menus,
     savedStores: state.savedStores,
     orders: state.orders,
-    reviews: state.reviews
+    reviews: state.reviews,
+    dailyStatuses: state.dailyStatuses
   });
 }
 
@@ -149,6 +152,7 @@ function applyDashboardData(data) {
   state.savedStores = data.savedStores || [];
   state.orders = data.orders || [];
   state.reviews = data.reviews || [];
+  state.dailyStatuses = data.dailyStatuses || {};
 
   const uniqueTodayStores = [...new Set(state.menus.map(m => m.store_name).filter(Boolean))];
   if (!state.hasInitializedExpand && uniqueTodayStores.length > 0) {
@@ -1190,6 +1194,13 @@ async function copyTextToClipboard(text) {
 /* ==================== 分頁 2：點餐紀錄（鎖定整卡＋立即移除防重複操作） ==================== */
 
 function renderHistory() {
+  renderWeeklyAllowanceCard();
+
+  const countHint = document.getElementById('history-count-hint');
+  if (countHint) {
+    countHint.textContent = `點餐紀錄（共 ${state.orders.length} 筆）`;
+  }
+
   const container = document.getElementById('history-container');
   if (state.orders.length === 0) {
     container.innerHTML = '<div class="empty-state"><p>尚無點餐紀錄</p></div>';
@@ -1283,6 +1294,287 @@ window.confirmDeleteOrder = async function(oIdx, btnEl) {
     }
   }, '<i class="fa-solid fa-spinner fa-spin"></i> 刪除中...');
 };
+
+/* ==================== 本週餐費請領統計與請假切換 ==================== */
+
+function getCurrentWeekdaysList() {
+  const baseStr = /^\d{4}-\d{2}-\d{2}$/.test(state.today)
+    ? state.today
+    : new Date().toISOString().slice(0, 10);
+  const [y, m, d] = baseStr.split('-').map(Number);
+  const baseUtc = new Date(Date.UTC(y, m - 1, d));
+  const dow = baseUtc.getUTCDay();
+  const diffToMon = dow === 0 ? -6 : 1 - dow;
+  const labels = ['一', '二', '三', '四', '五'];
+
+  return labels.map((label, i) => {
+    const dt = new Date(baseUtc.getTime() + (diffToMon + i) * 86400000);
+    const yy = dt.getUTCFullYear();
+    const mm = String(dt.getUTCMonth() + 1).padStart(2, '0');
+    const dd = String(dt.getUTCDate()).padStart(2, '0');
+    return { date: `${yy}-${mm}-${dd}`, shortDate: `${mm}/${dd}`, label };
+  });
+}
+
+function renderWeeklyAllowanceCard() {
+  const card = document.getElementById('weekly-allowance-card');
+  if (!card) return;
+
+  const today = state.today;
+  const weekdays = getCurrentWeekdaysList();
+  const orderedDates = new Set(state.orders.map(o => o.date));
+
+  let claimableCount = 0;
+  let leaveCount = 0;
+
+  const daysHtml = weekdays.map(d => {
+    const isToday = d.date === today;
+    const isFuture = today && d.date > today;
+    const hasOrder = orderedDates.has(d.date);
+    const isLeave = state.dailyStatuses[d.date] === 'leave';
+
+    let stClass = 'st-future';
+    let stText = '未到';
+    let clickable = true;
+    let tip = '點擊預排為請假';
+
+    if (hasOrder) {
+      stClass = 'st-ordered';
+      stText = '公司訂';
+      clickable = false;
+      tip = '當日已有公司訂餐紀錄';
+    } else if (isLeave) {
+      stClass = 'st-leave';
+      stText = '請假';
+      leaveCount++;
+      tip = '已標記請假（不請領），點擊可取消';
+    } else if (!isFuture) {
+      stClass = 'st-claimable';
+      stText = '自訂可領';
+      claimableCount++;
+      tip = '未向公司訂餐（計入可請領），點擊可改為請假';
+    }
+
+    const clickAttr = clickable ? `onclick="toggleWeekdayLeaveStatus('${d.date}', this)"` : '';
+    return `
+      <div class="allowance-day ${stClass} ${clickable ? 'clickable' : ''} ${isToday ? 'is-today' : ''}"
+        ${clickAttr} title="${tip}">
+        <span class="day-label">週${d.label}</span>
+        <span class="day-date">${d.shortDate}</span>
+        <span class="day-state">${stText}</span>
+      </div>`;
+  }).join('');
+
+  const summaryBadge = claimableCount > 0
+    ? `<span class="status-badge status-pending"><i class="fa-solid fa-coins"></i> 本週需請領 ${claimableCount} 天</span>`
+    : `<span class="status-badge status-done"><i class="fa-solid fa-check"></i> 本週不需請領</span>`;
+
+  card.innerHTML = `
+    <div class="allowance-header">
+      <span class="allowance-title"><i class="fa-solid fa-calendar-week"></i> 本週餐費請領</span>
+      ${summaryBadge}
+    </div>
+    <div class="allowance-grid">${daysHtml}</div>
+    <div class="allowance-hint">
+      <i class="fa-regular fa-hand-pointer"></i> 點擊非公司訂餐日期可切換「自訂可領 / 請假（不可領）」${leaveCount > 0 ? ` · 本週請假 ${leaveCount} 天` : ''}
+    </div>`;
+}
+
+window.toggleWeekdayLeaveStatus = async function(dateStr, el) {
+  const lockKey = `status_${dateStr}`;
+  if (state.pendingActions.has(lockKey)) return;
+
+  const isCurrentlyLeave = state.dailyStatuses[dateStr] === 'leave';
+  const nextStatus = isCurrentlyLeave ? '' : 'leave';
+  if (el) el.classList.add('is-deleting');
+
+  await runWithLock(lockKey, [], async () => {
+    try {
+      // 樂觀更新畫面並寫入後端
+      if (nextStatus === 'leave') {
+        state.dailyStatuses[dateStr] = 'leave';
+      } else {
+        delete state.dailyStatuses[dateStr];
+      }
+      persistCurrentStateToCache();
+      renderWeeklyAllowanceCard();
+
+      const freshData = await callGasApi('setDailyStatus', { date: dateStr, status: nextStatus });
+      saveCachedDashboard(freshData);
+      applyDashboardData(freshData);
+      showToast(nextStatus === 'leave' ? `已標記 ${dateStr} 為請假（不請領）` : `已取消 ${dateStr} 請假標記`);
+    } catch (err) {
+      showToast(`更新失敗：${err.message}`);
+      await syncDashboardFromServer(false).catch(() => {});
+    }
+  });
+};
+
+/* ==================== 手動批次匯入歷史點餐紀錄 ==================== */
+
+function openImportHistoryModal() {
+  state.parsedImportOrders = [];
+  document.getElementById('import-raw-text').value = '';
+  const previewEl = document.getElementById('import-preview-list');
+  previewEl.innerHTML = '';
+  previewEl.classList.add('hidden');
+  document.getElementById('btn-confirm-import').classList.add('hidden');
+  document.getElementById('import-history-modal').classList.remove('hidden');
+}
+
+/**
+ * 解析各種日常群組點餐文字格式（支援空行分段、Telegram 日期標頭、共$150 / 共150$、單行與無價品項）
+ */
+function parseHistoryTextBlocks(rawText) {
+  // 若使用者直接複製多則 Telegram 訊息未留空行，自動於 [YYYY/MM/DD ...] 標頭前插入空行分段
+  const normalized = String(rawText || '')
+    .replace(/\r\n/g, '\n')
+    .replace(/(?<!\n\n)\n(?=\[\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2})/g, '\n\n')
+    .trim();
+
+  if (!normalized) return [];
+
+  const blocks = normalized.split(/\n\s*\n+/).map(b => b.trim()).filter(Boolean);
+  const currentYear = /^\d{4}/.test(state.today) ? state.today.slice(0, 4) : String(new Date().getFullYear());
+  const parsedOrders = [];
+
+  blocks.forEach(block => {
+    const lines = block.split('\n').map(l => l.trim()).filter(Boolean);
+    let orderDate = '歷史匯入';
+    let explicitTotal = null;
+    const items = [];
+    const keptTextLines = [];
+
+    lines.forEach(line => {
+      // 1. 偵測日期列（支援 [2026/11/20 ...] 或 2026-11-20 或 11/20）
+      const fullDateMatch = line.match(/^\[?(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
+      if (fullDateMatch && (line.startsWith('[') || /^\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2}$/.test(line))) {
+        orderDate = `${fullDateMatch[1]}-${fullDateMatch[2].padStart(2, '0')}-${fullDateMatch[3].padStart(2, '0')}`;
+        return;
+      }
+      const shortDateMatch = line.match(/^(\d{1,2})[\/\-](\d{1,2})$/);
+      if (shortDateMatch) {
+        orderDate = `${currentYear}-${shortDateMatch[1].padStart(2, '0')}-${shortDateMatch[2].padStart(2, '0')}`;
+        return;
+      }
+
+      keptTextLines.push(line);
+
+      // 2. 偵測總計列（支援 共 $150 謝謝 / 共150$ 謝謝 / 共$140）
+      const totalMatch = line.match(/^共\s*\$?\s*(\d+)\s*\$?/);
+      if (totalMatch) {
+        explicitTotal = Number(totalMatch[1]);
+        return;
+      }
+
+      // 3. 解析單一品項列
+      let clean = line.replace(/\s*(謝謝|感謝)[!！~。.\s]*$/g, '').trim();
+      if (!clean) return;
+
+      let price = 0;
+      const priceMatch = clean.match(/(?:\$\s*(\d+)|(\d+)\s*\$)\s*$/);
+      if (priceMatch) {
+        price = Number(priceMatch[1] || priceMatch[2]) || 0;
+        clean = clean.slice(0, priceMatch.index).trim();
+      }
+
+      let storeName = '未標示店家';
+      let rawItem = clean;
+      const dashIdx = clean.search(/[-－]/);
+      if (dashIdx > 0) {
+        storeName = clean.slice(0, dashIdx).trim();
+        rawItem = clean.slice(dashIdx + 1).trim();
+      }
+
+      // 萃取小括號備註並清理品項名稱（方便與菜單及評價比對）
+      const notes = [];
+      const itemName = rawItem
+        .replace(/[（(]([^）)]+)[）)]/g, (_, inner) => {
+          notes.push(inner.trim());
+          return ' ';
+        })
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      if (itemName) {
+        items.push({
+          store_name: storeName,
+          category: '主餐',
+          item_name: itemName,
+          toppings: [],
+          spec: '',
+          price: price,
+          note: notes.join('/')
+        });
+      }
+    });
+
+    if (items.length > 0) {
+      const summed = items.reduce((acc, it) => acc + (Number(it.price) || 0), 0);
+      parsedOrders.push({
+        date: orderDate,
+        items: items,
+        total_price: explicitTotal !== null ? explicitTotal : summed,
+        formatted_text: keptTextLines.join('\n')
+      });
+    }
+  });
+
+  return parsedOrders;
+}
+
+function previewHistoryImport() {
+  const rawText = document.getElementById('import-raw-text').value;
+  const parsed = parseHistoryTextBlocks(rawText);
+  state.parsedImportOrders = parsed;
+
+  const previewEl = document.getElementById('import-preview-list');
+  const confirmBtn = document.getElementById('btn-confirm-import');
+
+  if (parsed.length === 0) {
+    previewEl.innerHTML = '<div class="empty-state" style="padding:14px;">無法解析任何紀錄，請確認格式（店家 - 品項 $金額）</div>';
+    previewEl.classList.remove('hidden');
+    confirmBtn.classList.add('hidden');
+    return;
+  }
+
+  previewEl.innerHTML = parsed.map((ord, idx) => {
+    const itemLines = ord.items.map(it => {
+      const noteStr = it.note ? ` (${escapeHtml(it.note)})` : '';
+      const priceStr = it.price > 0 ? `$${it.price}` : '無標價';
+      return `<div class="import-preview-line">• <strong>${escapeHtml(it.store_name)}</strong> - ${escapeHtml(it.item_name)}${noteStr} <span class="item-meta">${priceStr}</span></div>`;
+    }).join('');
+
+    return `
+      <div class="import-preview-card">
+        <div class="import-preview-head">
+          <span>#${idx + 1} · ${escapeHtml(ord.date)}</span>
+          <span>總計 $${ord.total_price}</span>
+        </div>
+        ${itemLines}
+      </div>`;
+  }).join('');
+
+  previewEl.classList.remove('hidden');
+  confirmBtn.innerHTML = `<i class="fa-solid fa-cloud-arrow-up"></i> 確認匯入 ${parsed.length} 筆紀錄`;
+  confirmBtn.classList.remove('hidden');
+}
+
+async function submitBatchImportOrders() {
+  if (state.parsedImportOrders.length === 0) return;
+
+  const btn = document.getElementById('btn-confirm-import');
+  await runWithLock('batchImportOrders', btn, async () => {
+    try {
+      const res = await callGasApi('batchImportOrders', { orders: state.parsedImportOrders });
+      closeModal('import-history-modal');
+      showToast(`成功匯入 ${res.imported} 筆歷史點餐紀錄！`);
+      await syncDashboardFromServer(false);
+    } catch (err) {
+      showToast(`匯入失敗：${err.message}`);
+    }
+  }, '<i class="fa-solid fa-spinner fa-spin"></i> 正在寫入試算表...');
+}
 
 /* ==================== 單一品項獨立評價彈窗 ==================== */
 
@@ -1867,6 +2159,10 @@ function bindEvents() {
   document.getElementById('btn-save-store-rename').addEventListener('click', saveStoreRename);
   document.getElementById('btn-save-menu-item').addEventListener('click', saveMenuItemEdit);
   document.getElementById('btn-delete-menu-item').addEventListener('click', deleteEditingMenuItem);
+  // 批次匯入歷史紀錄彈窗事件
+  document.getElementById('btn-open-import-history').addEventListener('click', openImportHistoryModal);
+  document.getElementById('btn-parse-import').addEventListener('click', previewHistoryImport);
+  document.getElementById('btn-confirm-import').addEventListener('click', submitBatchImportOrders);
 
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape') {
@@ -1875,6 +2171,7 @@ function bindEvents() {
       closeModal('store-rename-modal');
       closeModal('topping-target-modal');
       closeModal('store-library-modal');
+      closeModal('import-history-modal');
     }
   });
 }
