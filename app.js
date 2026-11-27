@@ -1037,16 +1037,40 @@ window.toggleCartDrinkOption = function(idx, field, val) {
   renderCart();
 };
 
+/**
+ * 正規化店註與快捷備註：將衝突的斜線（/、／）替換為「、」，並清理頭尾與連續空格
+ */
+function normalizeQuickNoteText(text) {
+  return String(text || '')
+    .replace(/[\/／]/g, '、')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * 拆解購物車備註欄供高亮與開關比對使用
+ */
+function splitCartCustomNotes(rawNote) {
+  return String(rawNote || '')
+    .split('/')
+    .map(s => s.replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+}
+
 window.toggleCartQuickNote = function(idx, noteText, extraPrice = 0) {
   const entry = state.cart[idx];
   if (!entry) return;
-  const parts = entry.custom_note ? entry.custom_note.split('/').map(s => s.trim()).filter(Boolean) : [];
-  const existsIdx = parts.indexOf(noteText);
+
+  const cleanNote = normalizeQuickNoteText(noteText);
+  if (!cleanNote) return;
+
+  const parts = splitCartCustomNotes(entry.custom_note);
+  const existsIdx = parts.indexOf(cleanNote);
   if (existsIdx > -1) {
     parts.splice(existsIdx, 1);
     if (extraPrice > 0) entry.extra_price = Math.max(0, entry.extra_price - extraPrice);
   } else {
-    parts.push(noteText);
+    parts.push(cleanNote);
     if (extraPrice > 0) entry.extra_price += extraPrice;
   }
   entry.custom_note = parts.join('/');
@@ -1277,19 +1301,20 @@ function renderCart() {
         <div class="opt-row"><span class="opt-label">甜度${sugarTag}</span>${sugarPills}</div>
         <div class="opt-row"><span class="opt-label">冰量${iceTag}</span>${icePills}</div>`;
     } else {
-      const activeNotes = entry.custom_note ? entry.custom_note.split('/').map(s => s.trim()) : [];
+      const activeNotes = splitCartCustomNotes(entry.custom_note);
       const foodPills = FOOD_QUICK_NOTES.map(fn => `
-        <button type="button" class="opt-pill ${activeNotes.includes(fn) ? 'active' : ''}"
+        <button type="button" class="opt-pill ${activeNotes.includes(normalizeQuickNoteText(fn)) ? 'active' : ''}"
           onclick="toggleCartQuickNote(${idx}, '${fn}', 0)">${fn}</button>
       `).join('');
       optionsHtml = `<div class="opt-row"><span class="opt-label">快捷</span>${foodPills}</div>`;
     }
 
     if (storeNoteItems.length > 0) {
-      const activeNotes = entry.custom_note ? entry.custom_note.split('/').map(s => s.trim()) : [];
+      const activeNotes = splitCartCustomNotes(entry.custom_note);
       const snPills = storeNoteItems.map(sn => {
-        const label = sn.price > 0 ? `${sn.item_name} (+$${sn.price})` : sn.item_name;
-        const isOn = activeNotes.includes(sn.item_name);
+        const cleanName = normalizeQuickNoteText(sn.item_name);
+        const label = sn.price > 0 ? `${cleanName} (+$${sn.price})` : cleanName;
+        const isOn = activeNotes.includes(cleanName);
         return `
           <button type="button" class="opt-pill ${isOn ? 'active' : ''}"
             onclick="applyStoreNoteToCart(${idx}, '${escapeHtml(sn.id)}')">${escapeHtml(label)}</button>`;
